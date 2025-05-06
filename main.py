@@ -115,5 +115,4 @@ async def ask(req: QuestionRequest):
         print("❗ 예외 발생:", e)
         return f"Error: {str(e)}"
     
-#프론트 연결
-    
+#프론트    
