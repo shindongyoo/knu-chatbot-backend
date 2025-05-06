@@ -63,51 +63,63 @@ async def ask(req: QuestionRequest):
     try:
         keyword = req.question.strip()
         words = keyword.split()
-        regex = "|".join(words)  # ex: "졸업요건 알려줘" -> "졸업요건|알려줘"
+        regex = "|".join(words)
 
         chatbot_db = mongo_client.chatbot_database
         collections = chatbot_db.list_collection_names()
 
         unique_results = {}
+        all_docs = []
 
         for coll_name in collections:
             coll = chatbot_db[coll_name]
             docs = coll.find({
                 "$or": [
                     {"title": {"$regex": regex, "$options": "i"}},
-                    {"content": {"$regex": regex, "$options": "i"}}
-                    {"name": {"$regex": regex, "$options": "i"}}
-                    {"position": {"$regex": regex, "$options": "i"}}
-                    {"major": {"$regex": regex, "$options": "i"}}
+                    {"content": {"$regex": regex, "$options": "i"}},
+                    {"name": {"$regex": regex, "$options": "i"}},
+                    {"position": {"$regex": regex, "$options": "i"}},
+                    {"major": {"$regex": regex, "$options": "i"}},
+                    {"section": {"$regex": regex, "$options": "i"}},
+                    {"body": {"$regex": regex, "$options": "i"}}
                 ]
             })
-            
+
             for doc in docs:
                 title = doc.get("title", "제목 없음")
                 url = doc.get("url", "")
                 key = f"{title}_{url}"
-                
+
                 if key not in unique_results:
-                        unique_results[key] = (title, url)
+                    unique_results[key] = True
+                    all_docs.append({
+                        "title": title,
+                        "url": url,
+                        "major": doc.get("major", ""),
+                        "position": doc.get("position", ""),
+                        "section": doc.get("section", ""),
+                        "body": doc.get("body", ""),
+                        "content": doc.get("content", "")
+                    })
 
         MAX_DOCS = 10
-             
-        all_results = list(unique_results.values())[:MAX_DOCS]  # ✅ 중복 제거
-        
-        if all_results:
+        selected_docs = all_docs[:MAX_DOCS]
+
+        if selected_docs:
             context = "\n".join(
-                f"- {title}: {url}" if url else f"- {title}"
-                for title, url in all_results
+                f"- 제목: {doc['title']}\n"
+                f"  전공: {doc['major']}\n"
+                f"  직책: {doc['position']}\n"
+                f"  소속: {doc['section']}\n"
+                f"  링크: {doc['url']}\n"
+                f"  내용: {doc['body'] or doc['content'] or '본문 없음'}"
+                for doc in selected_docs
             )
 
             answer = generate_answer(req.question, context)
-
             return JSONResponse(content={"answer": answer})
         else:
             return JSONResponse(content={"answer": f"'{keyword}' 관련된 문서를 찾지 못했습니다."})
-
-
-
 
     except Exception as e:
         print("❗ 예외 발생:", e)
