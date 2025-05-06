@@ -58,7 +58,7 @@ class QuestionRequest(BaseModel):
 async def root():
     return {"message": "API is running"}
 
-@app.post("/ask")
+@app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
     try:
         keyword = req.question.strip()
