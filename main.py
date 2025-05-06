@@ -76,6 +76,9 @@ async def ask(req: QuestionRequest):
                 "$or": [
                     {"title": {"$regex": regex, "$options": "i"}},
                     {"content": {"$regex": regex, "$options": "i"}}
+                    {"name": {"$regex": regex, "$options": "i"}}
+                    {"position": {"$regex": regex, "$options": "i"}}
+                    {"major": {"$regex": regex, "$options": "i"}}
                 ]
             })
             
