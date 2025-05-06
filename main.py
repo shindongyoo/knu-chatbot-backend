@@ -112,7 +112,7 @@ async def ask(req: QuestionRequest):
                 f"  직책: {doc['position']}\n"
                 f"  소속: {doc['section']}\n"
                 f"  링크: {doc['url']}\n"
-                f"  내용: {doc['body'] or doc['content'] or '본문 없음'}"
+                f"  내용: {doc['body'] or doc['content'] or '본문 없음'} |"
                 for doc in selected_docs
             )
 
