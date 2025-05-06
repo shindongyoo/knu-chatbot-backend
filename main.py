@@ -115,4 +115,13 @@ async def ask(req: QuestionRequest):
         print("❗ 예외 발생:", e)
         return f"Error: {str(e)}"
     
-#프론트    
+#프론트 연결
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 origin 허용 (필요 시 GitHub Pages 도메인만 설정 가능)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
