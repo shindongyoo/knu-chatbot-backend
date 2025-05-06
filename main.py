@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from pymongo import MongoClient
 import certifi
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse
 import cohere
 
 
@@ -58,11 +58,12 @@ class QuestionRequest(BaseModel):
 async def root():
     return {"message": "API is running"}
 
-@app.post("/ask", response_class=PlainTextResponse)
+@app.post("/ask")
 async def ask(req: QuestionRequest):
     try:
         keyword = req.question.strip()
-        all_results = []
+        words = keyword.split()
+        regex = "|".join(words)  # ex: "졸업요건 알려줘" -> "졸업요건|알려줘"
 
         chatbot_db = mongo_client.chatbot_database
         collections = chatbot_db.list_collection_names()
@@ -71,49 +72,43 @@ async def ask(req: QuestionRequest):
 
         for coll_name in collections:
             coll = chatbot_db[coll_name]
-            regex = "|".join(keyword.split())  # "졸업요건 알려줘" → "졸업요건|알려줘"
             docs = coll.find({
                 "$or": [
                     {"title": {"$regex": regex, "$options": "i"}},
                     {"content": {"$regex": regex, "$options": "i"}}
                 ]
             })
+            
             for doc in docs:
                 title = doc.get("title", "제목 없음")
                 url = doc.get("url", "")
+                key = f"{title}_{url}"
                 
-                if title not in unique_results:
-                    key = f"{title}__{url}"
-                    if key not in unique_results:
+                if key not in unique_results:
                         unique_results[key] = (title, url)
 
-        MAX_DOCS = 10     
-               
+        MAX_DOCS = 10
+             
         all_results = list(unique_results.values())[:MAX_DOCS]  # ✅ 중복 제거
         
-        context = "\n".join(
-            f"- {title}: {url}" if url else f"- {title}"
-            for (title, url) in all_results
-        )
-
-
-
-
         if all_results:
             context = "\n".join(
-                f"- [{title}]({url})" if url else f"- {title}"
-                for (title, url) in all_results
+                f"- {title}: {url}" if url else f"- {title}"
+                for title, url in all_results
             )
+
             answer = generate_answer(req.question, context)
-            return answer  # ✅ 이제 AI 요약 결과를 실제로 반환함!
+
+            return JSONResponse(content={"answer": answer})
         else:
-            return f"'{keyword}' 관련된 문서를 찾지 못했습니다.'"
+            return JSONResponse(content={"answer": f"'{keyword}' 관련된 문서를 찾지 못했습니다."})
+
 
 
 
     except Exception as e:
         print("❗ 예외 발생:", e)
-        return f"Error: {str(e)}"
+        return JSONResponse(content={"error": str(e)})
     
 #프론트 연결
 from fastapi.middleware.cors import CORSMiddleware
