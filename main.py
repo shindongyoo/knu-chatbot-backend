@@ -9,10 +9,6 @@ from fastapi.responses import JSONResponse
 import openai
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-if not os.getenv("COHERE_API_KEY"):
-    raise RuntimeError("COHERE_API_KEY가 설정되지 않았습니다!")
-COHERE_MODEL = "command-nightly"
-
 
 def generate_answer(user_question, context_text):
     prompt = (
