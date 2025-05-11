@@ -6,16 +6,13 @@ load_dotenv()
 from pymongo import MongoClient
 import certifi
 from fastapi.responses import JSONResponse
-import cohere
-
+import openai
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 if not os.getenv("COHERE_API_KEY"):
     raise RuntimeError("COHERE_API_KEY가 설정되지 않았습니다!")
 COHERE_MODEL = "command-nightly"
 
-
-#cohere ai
-cohere_client = cohere.Client(os.getenv("COHERE_API_KEY"))
 
 def generate_answer(user_question, context_text):
     prompt = (
@@ -26,14 +23,15 @@ def generate_answer(user_question, context_text):
         f"답변은 친절하고 이해하기 쉽게 작성해주세요."
     )
 
-    response = cohere_client.chat(
-        message=prompt,
-        model="command-nightly",
-        temperature=0.5,
-        max_tokens=400
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # 또는 "gpt-4" 사용 가능
+        messages=[
+            {"role": "system", "content": "너는 친절한 경북대 전기과 졸업요건 안내 챗봇이야."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.4
     )
-
-    return response.text.strip()
+    return response['choices'][0]['message']['content'].strip()
 
 
 #mongo db
