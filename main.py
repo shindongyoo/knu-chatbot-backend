@@ -6,28 +6,32 @@ load_dotenv()
 from pymongo import MongoClient
 import certifi
 from fastapi.responses import JSONResponse
-import openai
-openai.api_key = os.getenv("OPENAI_API_KEY")
+from openai import OpenAI
+import re
 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def generate_answer(user_question, context_text):
+def generate_answer(user_question, context_text, field_names):
     prompt = (
         f"사용자의 질문: '{user_question}'\n\n"
-        f"아래는 관련 문서 제목과 링크입니다:\n{context_text}\n\n"
-        f"이 문서 목록을 기반으로 질문과 관련된 정보들을 요약하지 말고, 문서 제목과 링크를 자연스럽게 정리해서 보여주세요.\n"
-        f"관련 문서가 있다면, 그 링크도 자연스럽게 포함해주세요.\n"
-        f"답변은 친절하고 이해하기 쉽게 작성해주세요."
+        f"아래는 관련 문서들의 다양한 정보입니다:\n{context_text}\n\n"
+        f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}.\n"
+        f"가능한 모든 필드 값을 활용해서 질문에 답변해 주세요.\n"
+        f"특히 lab, phone, email, homepage, url, content 등이 포함되어 있을 경우 반드시 응답에 포함해 주세요.\n"
+        f"문서 제목과 링크도 자연스럽게 포함해 주세요.\n"
+        f"질문과 관련 없는 문서는 제외하세요.\n"
     )
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",  # 또는 "gpt-4" 사용 가능
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "너는 친절한 경북대 전기과 졸업요건 안내 챗봇이야."},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.4
+        temperature=0.4,
     )
-    return response['choices'][0]['message']['content'].strip()
+
+    return response.choices[0].message.content.strip()
 
 
 #mongo db
@@ -56,8 +60,10 @@ async def root():
 async def ask(req: QuestionRequest):
     try:
         keyword = req.question.strip()
-        words = keyword.split()
-        regex = "|".join(words)
+        cleaned = re.sub(r"[은는이가을를도에의와과로]", "", keyword)
+        words = re.findall(r"[가-힣a-zA-Z0-9]+", cleaned)
+        regex = f"{keyword}|{'|'.join(words)}"
+
 
         chatbot_db = mongo_client.chatbot_database
         collections = chatbot_db.list_collection_names()
@@ -75,42 +81,72 @@ async def ask(req: QuestionRequest):
                     {"position": {"$regex": regex, "$options": "i"}},
                     {"major": {"$regex": regex, "$options": "i"}},
                     {"section": {"$regex": regex, "$options": "i"}},
-                    {"body": {"$regex": regex, "$options": "i"}}
+                    {"body": {"$regex": regex, "$options": "i"}},
+                    {"date": {"$regex": regex, "$options": "i"}},
+                    {"type": {"$regex": regex, "$options": "i"}},
+                    {"phone": {"$regex": regex, "$options": "i"}},
+                    {"email": {"$regex": regex, "$options": "i"}},
+                    {"homepage": {"$regex": regex, "$options": "i"}},
+                    {"lab": {"$regex": regex, "$options": "i"}}
                 ]
             })
 
             for doc in docs:
-                title = doc.get("title", "제목 없음")
-                url = doc.get("url", "")
-                key = f"{title}_{url}"
+                key = str(doc.get("_id", ""))
+                    
 
                 if key not in unique_results:
                     unique_results[key] = True
                     all_docs.append({
-                        "title": title,
-                        "url": url,
+                        "title": doc.get("title", "제목 없음"),
+                        "url": doc.get("url", ""),
                         "major": doc.get("major", ""),
                         "position": doc.get("position", ""),
                         "section": doc.get("section", ""),
                         "body": doc.get("body", ""),
-                        "content": doc.get("content", "")
+                        "content": doc.get("content", ""),
+                        "date": doc.get("date", ""),
+                        "type": doc.get("type", ""),
+                        "phone": doc.get("phone", ""),
+                        "email": doc.get("email", ""),
+                        "homepage": doc.get("homepage", ""),
+                        "lab": doc.get("lab", "")
                     })
 
+
         MAX_DOCS = 10
-        selected_docs = all_docs[:MAX_DOCS]
+        priority_docs = []
+        other_docs = []
+
+        for doc in all_docs:
+            combined_text = " ".join([
+                doc.get("title", ""),
+                doc.get("name", ""),
+                doc.get("body", ""),
+                doc.get("content", "")
+            ])
+            if any(word in combined_text for word in words):
+                priority_docs.append(doc)
+            else:
+                other_docs.append(doc)
+
+        selected_docs = (priority_docs + other_docs)[:MAX_DOCS]
+
 
         if selected_docs:
-            context = "\n".join(
-                f"- 제목: {doc['title']}\n"
-                f"  전공: {doc['major']}\n"
-                f"  직책: {doc['position']}\n"
-                f"  소속: {doc['section']}\n"
-                f"  링크: {doc['url']}\n"
-                f"  내용: {doc['body'] or doc['content'] or '본문 없음'} |"
-                for doc in selected_docs
-            )
+            context = ""
+            field_names = set()
 
-            answer = generate_answer(req.question, context)
+            for doc in selected_docs:
+                context += "- 문서 정보:\n"
+                for key, value in doc.items():
+                    if value:
+                        context += f"  {key}: {value}\n"
+                        field_names.add(key)
+                context += "|\n"
+
+            answer = generate_answer(req.question, context, field_names)
+            
             return JSONResponse(content={"answer": answer})
         else:
             return JSONResponse(content={"answer": f"'{keyword}' 관련된 문서를 찾지 못했습니다."})
