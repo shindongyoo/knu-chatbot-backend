@@ -8,6 +8,9 @@ import certifi
 from fastapi.responses import JSONResponse
 from openai import OpenAI
 import re
+import redis
+import json
+from datetime import datetime
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -33,7 +36,6 @@ def generate_answer(user_question, context_text, field_names):
 
     return response.choices[0].message.content.strip()
 
-
 #mongo db
 MONGO_URI = os.getenv("MONGO_URI")
 
@@ -49,12 +51,18 @@ mongo_client = MongoClient(
 db = mongo_client.KNUChatbot
 collection = db.notices
 
+#대화기록
+r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
 class QuestionRequest(BaseModel):
+    session_id: str
     question: str
 
-@app.get("/")
-async def root():
-    return {"message": "API is running"}
+@app.get("/history/{session_id}")
+async def get_history(session_id: str):
+    key = f"chat:{session_id}"
+    logs = r.lrange(key, 0, -1)
+    return JSONResponse(content={"history": [json.loads(item) for item in logs]})
 
 @app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
@@ -146,6 +154,14 @@ async def ask(req: QuestionRequest):
                 context += "|\n"
 
             answer = generate_answer(req.question, context, field_names)
+            
+            #Redis 대화저장
+            chat = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "question": req.question,
+                "answer": answer
+            }
+            r.rpush(f"chat:{req.session_id}", json.dumps(chat)) #리스트로 누적적
             
             return JSONResponse(content={"answer": answer})
         else:
