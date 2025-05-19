@@ -51,14 +51,14 @@ mongo_client = MongoClient(
 db = mongo_client.KNUChatbot
 collection = db.notices
 
-#대화기록
+#대화기록(5/19)
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
-class QuestionRequest(BaseModel):
+class QuestionRequest(BaseModel): #519
     session_id: str
     question: str
 
-@app.get("/history/{session_id}")
+@app.get("/history/{session_id}") #519
 async def get_history(session_id: str):
     key = f"chat:{session_id}"
     logs = r.lrange(key, 0, -1)
@@ -155,7 +155,7 @@ async def ask(req: QuestionRequest):
 
             answer = generate_answer(req.question, context, field_names)
             
-            #Redis 대화저장
+            #Redis 대화저장 519
             chat = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "question": req.question,
