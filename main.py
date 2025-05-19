@@ -128,8 +128,8 @@ async def ask(req: QuestionRequest):
 
         for doc in all_docs:
             combined_text = " ".join([
-                doc.get("title", ""),
                 doc.get("name", ""),
+                doc.get("title", ""),
                 doc.get("body", ""),
                 doc.get("content", "")
             ])
