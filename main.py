@@ -111,7 +111,7 @@ def get_context_and_fields(question: str):
 # Regular GPT response API
 @app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
-    if not session_id:
+    if not req.session_id:
         return JSONResponse(content={"error": "session_id is required"}, status_code=400)
 
     try:
