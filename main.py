@@ -187,6 +187,8 @@ async def stream_answer(req: Request):
         )
         for chunk in response:
             delta = chunk.choices[0].delta.content or ""
+            delta = fix_url_spacing(delta)
+            delta = insert_newlines_after_sentences(delta)
             full_answer += delta
             full_answer = fix_url_spacing(full_answer)
             yield f"data: {delta}\n\n"
