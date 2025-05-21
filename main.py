@@ -30,7 +30,12 @@ mongo_client = MongoClient(
 chatbot_db = mongo_client.chatbot_database
 
 # Redis setup
-r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+r = redis.Redis(
+    host=os.getenv("REDIS_HOST"),
+    port=int(os.getenv("REDIS_PORT")),
+    password=os.getenv("REDIS_PASSWORD"),
+    decode_responses=True
+)
 
 # FastAPI app
 app = FastAPI()
@@ -182,3 +187,12 @@ async def get_history(session_id: str):
     key = f"chat:{session_id}"
     logs = r.lrange(key, 0, -1)
     return JSONResponse(content={"history": [json.loads(item) for item in logs]})
+
+#연결테스트
+@app.get("/ping-redis")
+def ping_redis():
+    try:
+        pong = r.ping()
+        return {"status": "ok", "ping": pong}
+    except Exception as e:
+        return {"status": "error", "details": str(e)}
