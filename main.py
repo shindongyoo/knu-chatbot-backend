@@ -177,14 +177,13 @@ async def stream_answer(req: Request):
         for chunk in response:
             delta = chunk.choices[0].delta.content or ""
             full_answer += delta
+            yield f"data: {delta}\n\n"
 
         r.rpush(f"chat:{session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": question,
             "answer": full_answer
         }))
-
-        yield f"data: {full_answer}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
