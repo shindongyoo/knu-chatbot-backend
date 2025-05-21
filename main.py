@@ -175,7 +175,7 @@ async def stream_answer(req: Request):
             stream=True
         )
         for chunk in response:
-            delta = chunk.choices[0].delta.get("content", "")
+            delta = chunk.choices[0].delta.content or ""
             full_answer += delta
 
         r.rpush(f"chat:{session_id}", json.dumps({
