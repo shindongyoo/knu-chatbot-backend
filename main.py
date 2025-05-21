@@ -202,3 +202,25 @@ def ping_redis():
 @app.get("/")
 def root():
     return {"message": "KNU Chatbot backend is running"}
+
+@app.post("/history", response_class=JSONResponse)
+async def post_history(req: Request):
+    try:
+        body = await req.json()
+        session_id = body.get("session_id")
+        if not session_id:
+            return JSONResponse(content={"error": "session_id is required"}, status_code=400)
+
+        key = f"chat:{session_id}"
+        logs = r.lrange(key, 0, -1)
+
+        history = []
+        for item in logs:
+            parsed = json.loads(item)
+            history.append({"role": "user", "content": parsed["question"]})
+            history.append({"role": "bot", "content": parsed["answer"]})
+
+        return JSONResponse(content=history)
+
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
