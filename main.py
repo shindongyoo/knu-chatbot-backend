@@ -114,8 +114,8 @@ def fix_url_spacing(text: str) -> str:
     pattern = r'(https?://[^\sㄱ-ㅎ가-힣\)\]\}]+)'
     return re.sub(pattern, lambda m: f' {m.group(1)} ', text)
 
+# 마침표, 물음표, 느낌표 뒤에 줄바꿈 추가 (한글 기준)
 def insert_newlines_after_sentences(text: str) -> str:
-    # 마침표, 물음표, 느낌표 뒤에 줄바꿈 추가 (한글 기준)
     return re.sub(r'([.!?])(?=\s)', r'\1\n', text)
 
 @app.post("/ask", response_class=JSONResponse)
@@ -152,7 +152,7 @@ async def ask(req: QuestionRequest):
         r.rpush(f"chat:{req.session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": req.question,
-            "answer": full_answer
+            "answer": answer
         }))
 
         return JSONResponse(content={"answer": answer})
