@@ -111,7 +111,8 @@ def get_context_and_fields(question: str):
 # Regular GPT response API
 
 def fix_url_spacing(text: str) -> str:
-    return re.sub(r'(?<!\s)(https?://[^\s]+)(?!\s)', r' \1 ', text)
+    pattern = r'(https?://[^\sㄱ-ㅎ가-힣\)\]\}]+)'
+    return re.sub(pattern, lambda m: f' {m.group(1)} ', text)
 
 def insert_newlines_after_sentences(text: str) -> str:
     # 마침표, 물음표, 느낌표 뒤에 줄바꿈 추가 (한글 기준)
