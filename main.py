@@ -109,6 +109,14 @@ def get_context_and_fields(question: str):
     return context, field_names
 
 # Regular GPT response API
+
+def fix_url_spacing(text: str) -> str:
+    return re.sub(r'(?<!\s)(https?://[^\s]+)(?!\s)', r' \1 ', text)
+
+def insert_newlines_after_sentences(text: str) -> str:
+    # 마침표, 물음표, 느낌표 뒤에 줄바꿈 추가 (한글 기준)
+    return re.sub(r'([.!?])(?=\s)', r'\1\n', text)
+
 @app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
     if not req.session_id:
@@ -137,11 +145,16 @@ async def ask(req: QuestionRequest):
         )
 
         answer = response.choices[0].message.content.strip()
+        answer = fix_url_spacing(answer)
+        answer = insert_newlines_after_sentences(answer)
+
+        full_answer = fix_url_spacing(full_answer)
+        full_answer = insert_newlines_after_sentences(full_answer)
 
         r.rpush(f"chat:{req.session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": req.question,
-            "answer": answer
+            "answer": full_answer
         }))
 
         return JSONResponse(content={"answer": answer})
@@ -177,6 +190,7 @@ async def stream_answer(req: Request):
         for chunk in response:
             delta = chunk.choices[0].delta.content or ""
             full_answer += delta
+            full_answer = fix_url_spacing(full_answer)
             yield f"data: {delta}\n\n"
 
         r.rpush(f"chat:{session_id}", json.dumps({
