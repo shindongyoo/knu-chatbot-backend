@@ -148,9 +148,6 @@ async def ask(req: QuestionRequest):
         answer = fix_url_spacing(answer)
         answer = insert_newlines_after_sentences(answer)
 
-        full_answer = fix_url_spacing(full_answer)
-        full_answer = insert_newlines_after_sentences(full_answer)
-
         r.rpush(f"chat:{req.session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": req.question,
@@ -192,6 +189,9 @@ async def stream_answer(req: Request):
             full_answer += delta
             full_answer = fix_url_spacing(full_answer)
             yield f"data: {delta}\n\n"
+
+        full_answer = fix_url_spacing(full_answer)
+        full_answer = insert_newlines_after_sentences(full_answer)
 
         r.rpush(f"chat:{session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
