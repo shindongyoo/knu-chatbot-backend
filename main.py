@@ -202,13 +202,6 @@ async def stream_answer(req: Request):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-# 대화 기록 조회
-@app.get("/history/{session_id}")
-async def get_history(session_id: str):
-    key = f"chat:{session_id}"
-    logs = r.lrange(key, 0, -1)
-    return JSONResponse(content={"history": [json.loads(item) for item in logs]})
-
 #연결테스트
 @app.get("/ping-redis")
 def ping_redis():
@@ -218,7 +211,14 @@ def ping_redis():
     except Exception as e:
         return {"status": "error", "details": str(e)}
 
-#대화흐름 API?
+# 대화 기록 조회
+@app.get("/history/{session_id}")
+async def get_history(session_id: str):
+    key = f"chat:{session_id}"
+    logs = r.lrange(key, 0, -1)
+    return JSONResponse(content={"history": [json.loads(item) for item in logs]})
+
+#대화흐름 API
 @app.get("/")
 def root():
     return {"message": "KNU Chatbot backend is running"}
