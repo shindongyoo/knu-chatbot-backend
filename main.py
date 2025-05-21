@@ -187,6 +187,7 @@ async def stream_answer(req: Request):
         )
         for chunk in response:
             delta = chunk.choices[0].delta.content or ""
+            print(repr(delta))
             full_answer += delta
             yield f"data: {delta}\n\n"
 
