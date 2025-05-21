@@ -111,6 +111,9 @@ def get_context_and_fields(question: str):
 # Regular GPT response API
 @app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
+    if not session_id:
+        return JSONResponse(content={"error": "session_id is required"}, status_code=400)
+
     try:
         context, field_names = get_context_and_fields(req.question)
 
@@ -152,6 +155,8 @@ async def ask(req: QuestionRequest):
 async def stream_answer(req: Request):
     body = await req.json()
     session_id = body.get("session_id")
+    if not session_id:
+        return JSONResponse(content={"error": "session_id is required"}, status_code=400)
     question = body.get("question")
 
     context, field_names = get_context_and_fields(question)
@@ -198,7 +203,8 @@ def ping_redis():
         return {"status": "ok", "ping": pong}
     except Exception as e:
         return {"status": "error", "details": str(e)}
-    
+
+#대화흐름 API?
 @app.get("/")
 def root():
     return {"message": "KNU Chatbot backend is running"}
