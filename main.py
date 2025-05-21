@@ -196,3 +196,7 @@ def ping_redis():
         return {"status": "ok", "ping": pong}
     except Exception as e:
         return {"status": "error", "details": str(e)}
+    
+@app.get("/")
+def root():
+    return {"message": "KNU Chatbot backend is running"}
