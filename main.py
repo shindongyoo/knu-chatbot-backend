@@ -187,19 +187,16 @@ async def stream_answer(req: Request):
         )
         for chunk in response:
             delta = chunk.choices[0].delta.content or ""
-            delta = fix_url_spacing(delta)
-            delta = insert_newlines_after_sentences(delta)
             full_answer += delta
-            full_answer = fix_url_spacing(full_answer)
             yield f"data: {delta}\n\n"
 
-        full_answer = fix_url_spacing(full_answer)
-        full_answer = insert_newlines_after_sentences(full_answer)
+        answer = fix_url_spacing(full_answer)
+        answer = insert_newlines_after_sentences(answer)
 
         r.rpush(f"chat:{session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": question,
-            "answer": full_answer
+            "answer": answer
         }))
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
