@@ -156,6 +156,9 @@ async def ask(req: QuestionRequest):
             temperature=0.4
         )
         answer = response.choices[0].message.content.strip()
+        
+        print("DEBUG 답변: ", repr(answer))
+
         r.rpush(f"chat:{req.session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": req.question,
@@ -193,10 +196,14 @@ async def stream_answer(req: Request):
             ],
             stream=True
         )
+        # 여기서 한글자씩 yield하지 않고, 누적만 하다가 마지막에 yield!
         for chunk in response:
             delta = getattr(chunk.choices[0].delta, "content", "") or ""
             full_answer += delta
-            yield f"data: {delta}\n\n"
+        # 다 모인 후 한 번만 yield!
+        yield f"data: {full_answer}\n\n"
+
+        # (아래는 그대로)
         r.rpush(f"chat:{session_id}", json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "question": question,
