@@ -143,6 +143,8 @@ async def ask(req: QuestionRequest):
             f"특히 lab, phone, email, homepage, url, content 등이 포함되어 있을 경우 반드시 응답에 포함해 주세요.\n"
             f"문서 제목과 링크도 자연스럽게 포함해 주세요.\n"
             f"질문과 관련 없는 문서는 제외하세요.\n"
+            f"답변을 할 때는 반드시 자연스러운 한국어 띄어쓰기를 모두 적용해서 출력하세요. 붙여쓰기가 있는 부분은 전부 띄어쓰기를 바로잡아 주세요.\n"
+
         )
 
         response = client.chat.completions.create(
