@@ -3,5 +3,10 @@ uvicorn
 python-dotenv
 pymongo
 certifi
-openai
 redis
+openai
+keybert
+kiwipiepy
+scikit-learn
+sentence-transformers
+numpy
