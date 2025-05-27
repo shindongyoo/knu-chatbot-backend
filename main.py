@@ -50,8 +50,8 @@ class QuestionRequest(BaseModel):
     question: str
 
 # 키워드 추출기
-kw_model = KeyBERT()
-kiwi = Kiwi()
+#kw_model = KeyBERT()
+#kiwi = Kiwi()
 
 def extract_keywords_korean(question: str, top_n=5) -> list:
     return [question.strip()]
