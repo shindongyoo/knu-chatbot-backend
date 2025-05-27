@@ -32,7 +32,13 @@ mongo_client = MongoClient(
 chatbot_db = mongo_client.chatbot_database
 
 # Redis setup (로컬)
-r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+r = redis.Redis(
+    host=os.getenv("REDIS_HOST"),
+    port=int(os.getenv("REDIS_PORT")),
+    password=os.getenv("REDIS_PASSWORD"),
+    decode_responses=True
+)
+
 
 # FastAPI app
 app = FastAPI()
