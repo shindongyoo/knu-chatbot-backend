@@ -5,8 +5,8 @@ pymongo
 certifi
 redis
 openai
-keybert
+#keybert
 kiwipiepy
-scikit-learn
-sentence-transformers
-numpy
+#scikit-learn
+#sentence-transformers
+#numpy

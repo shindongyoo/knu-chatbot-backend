@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from openai import OpenAI
-from keybert import KeyBERT
-from kiwipiepy import Kiwi
+#from keybert import KeyBERT
+#from kiwipiepy import Kiwi
 
 # Load environment variables
 load_dotenv()
@@ -54,16 +54,8 @@ kw_model = KeyBERT()
 kiwi = Kiwi()
 
 def extract_keywords_korean(question: str, top_n=5) -> list:
-    try:
-        keybert_keywords = kw_model.extract_keywords(question, top_n=top_n, stop_words=None)
-        keybert_words = [kw[0] for kw in keybert_keywords if len(kw[0]) >= 2]
-        pos_tags = kiwi.analyze(question)[0][0]
-        noun_words = [word for word, tag, _, _ in pos_tags if tag in ("NNG", "NNP") and len(word) > 1]
-        combined_keywords = list(set(keybert_words + noun_words))
-        return combined_keywords if combined_keywords else [question.strip()]
-    except Exception as e:
-        print("❗ 키워드 추출 실패:", e)
-        return [question.strip()]
+    return [question.strip()]
+
 
 def get_context_and_fields(question: str):
     keywords = extract_keywords_korean(question)
