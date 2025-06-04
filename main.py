@@ -298,7 +298,6 @@ async def upload_file(session_id: str = Form(...), file: UploadFile = File(...))
         "filename": filename,
         "uploaded_at": datetime.utcnow()
     })
-    upsert=True
     
     print("[UPLOAD] MongoDB 저장 완료", flush=True)
     return {"msg": "MongoDB 저장 성공", "text_length": len(extracted_text)}
@@ -317,28 +316,30 @@ async def ask(req: QuestionRequest):
         print("[ASK] files:", files, flush=True)
         file_context = "\n".join(file_doc["text"] for file_doc in files if "text" in file_doc)
         print("[ASK] file_context:", repr(file_context[:500]), flush=True)
-        
-        print(f"[ASK] file_context(앞 500글자):\n{file_context[:500]}")
 
         # ... 기존 get_context_and_fields 코드 ...
         context, field_names = get_context_and_fields(req.question)
-        full_context = (file_context + "\n" if file_context else "") + context
 
         # ... prompt와 GPT 호출에서 context → full_context 사용 ...
-        prompt = (
-            f"파일에서 추출된 내용:\n{file_context}\n\n" if file_context else ""
-        ) + (
+        prompt = ""
+        if file_context:
+            prompt += (
+                "아래는 사용자가 업로드한 파일에서 추출한 텍스트입니다. 반드시 이 내용을 참고해서 답변해 주세요.\n"
+                "----- 파일에서 추출된 내용 -----\n"
+                f"{file_context}\n"
+                "----- 파일 내용 끝 -----\n\n"
+            )
+        prompt += (
             f"아래는 관련 문서 정보입니다:\n{context}\n\n"
-        ) + (
             f"사용자 질문: {req.question}"
         )
 
-        print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}")
+        print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}", flush=True)
 
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "너는 친절한 경북대 전기과 졸업요건 안내 챗봇이야."},
+                {"role": "system", "content": "너는 친절한 경북대 전기과 안내 챗봇이야. 만약 프롬프트에 '파일에서 추출된 내용'이 있다면 반드시 그 내용을 참고해서 답변해라."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.4
