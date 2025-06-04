@@ -143,6 +143,11 @@ async def stream_answer(req: Request):
     # 최근 대화 내역
     recent = get_recent_history(session_id, n=4)
     context, field_names = get_context_and_fields(question)
+    
+    print(f"[STREAM] session_id={session_id}", flush=True)
+    print(f"[STREAM] recent: {recent}", flush=True)
+    print(f"[STREAM] context(앞 300자): {context[:300]}", flush=True)
+    print(f"[STREAM] field_names: {field_names}", flush=True)
 
     def event_generator():
         full_answer = ""
