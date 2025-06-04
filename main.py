@@ -254,11 +254,7 @@ async def upload_file(session_id: str = Form(...), file: UploadFile = File(...))
     print(f"[UPLOAD] 업로드 요청: session_id={session_id}, filename={file.filename}", flush=True)
     filename = file.filename
     file_path = os.path.join(UPLOAD_DIR, filename)
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-
-    # 1. 파일 저장 전후로 print
-    print(f"[UPLOAD] 업로드 시도: {filename}", flush=True)
+    
     with open(file_path, "wb") as f:
         f.write(await file.read())
     print(f"[UPLOAD] 파일 저장 완료: {file_path}", flush=True)
