@@ -324,3 +324,4 @@ async def ask(req: QuestionRequest):
     except Exception as e:
         print("❗ 예외 발생:", e)
         return JSONResponse(content={"error": str(e)}, status_code=500)
+    
