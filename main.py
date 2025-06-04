@@ -144,19 +144,27 @@ async def stream_answer(req: Request):
     recent = get_recent_history(session_id, n=4)
     context, field_names = get_context_and_fields(question)
     
-    print(f"[STREAM] session_id={session_id}", flush=True)
-    print(f"[STREAM] recent: {recent}", flush=True)
-    print(f"[STREAM] context(앞 300자): {context[:300]}", flush=True)
-    print(f"[STREAM] field_names: {field_names}", flush=True)
+    # 업로드 파일에서 추출된 텍스트 읽기
+    files = list(chatbot_db.uploaded_files.find({"session_id": session_id}))
+    file_context = "\n".join(file_doc["text"] for file_doc in files if "text" in file_doc)
+    print(f"[STREAM] file_context(앞 300자): {file_context[:300]}", flush=True)
 
     def event_generator():
-        full_answer = ""
-        prompt = (
+        prompt = ""
+        if file_context:
+            prompt += (
+                "아래는 사용자가 업로드한 파일에서 추출한 텍스트입니다. 반드시 이 내용을 참고해서 답변해 주세요.\n"
+                "----- 파일에서 추출된 내용 -----\n"
+                f"{file_context}\n"
+                "----- 파일 내용 끝 -----\n\n"
+            )
+        prompt += (
             (f"이전 대화 기록:\n{recent}\n\n" if recent else "") +
             f"사용자의 질문: '{question}'\n\n"
             f"{context}\n\n"
             f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}."
         )
+
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -165,6 +173,8 @@ async def stream_answer(req: Request):
             ],
             stream=True
         )
+        # 이하 생략
+
         # 여기서 한글자씩 yield하지 않고, 누적만 하다가 마지막에 yield!
         buffer = ""
         for chunk in response:
