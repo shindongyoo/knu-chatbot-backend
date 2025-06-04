@@ -251,6 +251,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)  # 폴더 없으면 자동 생성
 
 @app.post("/upload")
 async def upload_file(session_id: str = Form(...), file: UploadFile = File(...)):
+    print(f"[UPLOAD] 업로드 요청: session_id={session_id}, filename={file.filename}")
     filename = file.filename
     file_path = os.path.join(UPLOAD_DIR, filename)
     with open(file_path, "wb") as f:
@@ -323,6 +324,6 @@ async def ask(req: QuestionRequest):
 
     except Exception as e:
         import traceback
-        print("파일 업로드/텍스트 추출 중 오류:", e)
+        print("[UPLOAD][ERROR]", e)
         traceback.print_exc()
         return JSONResponse(content={"error": f"파일 처리 중 오류: {e}"}, status_code=400)
