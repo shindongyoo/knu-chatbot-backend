@@ -133,47 +133,6 @@ def get_recent_history(session_id: str, n=4) -> str:
             dialogue.append(f"챗봇: {a}")
     return "\n".join(dialogue) if dialogue else ""
 
-@app.post("/ask", response_class=JSONResponse)
-async def ask(req: QuestionRequest):
-    try:
-        # 최근 대화 불러오기 (ex: 4개)
-        recent = get_recent_history(req.session_id, n=4)
-        context, field_names = get_context_and_fields(req.question)
-        prompt = (
-            (f"이전 대화 기록:\n{recent}\n\n" if recent else "") +
-            f"사용자의 질문: '{req.question}'\n\n"
-            f"아래는 관련 문서들의 다양한 정보입니다:\n{context}\n\n"
-            f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}.\n"
-            f"가능한 모든 필드 값을 활용해서 질문에 답변해 주세요.\n"
-            f"특히 lab, phone, email, homepage, url, content 등이 포함되어 있을 경우 반드시 응답에 포함해 주세요.\n"
-            f"문서 제목과 링크도 자연스럽게 포함해 주세요.\n"
-            f"질문과 관련 없는 문서는 제외하세요.\n"
-            f"답변을 할 때는 반드시 자연스러운 한국어 띄어쓰기를 모두 적용해서 출력하세요. 붙여쓰기가 있는 부분은 전부 띄어쓰기를 바로잡아 주세요.\n"
-
-        )
-
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "너는 친절한 경북대 전기과 졸업요건 안내 챗봇이야."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.4
-        )
-        answer = response.choices[0].message.content.strip()
-        
-        print("DEBUG 답변: ", repr(answer))
-
-        r.rpush(f"chat:{req.session_id}", json.dumps({
-            "timestamp": datetime.utcnow().isoformat(),
-            "question": req.question,
-            "answer": answer
-        }))
-        return JSONResponse(content={"answer": answer})
-
-    except Exception as e:
-        print("❗ 예외 발생:", e)
-        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.post("/stream")
 async def stream_answer(req: Request):
