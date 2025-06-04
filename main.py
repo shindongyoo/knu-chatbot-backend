@@ -275,16 +275,18 @@ chatbot_db.uploaded_files.create_index(
 @app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
     try:
-        # 파일에서 추출된 텍스트 가져오기
+        recent = get_recent_history(req.session_id, n=4)
         files = list(chatbot_db.uploaded_files.find({"session_id": req.session_id}))
-        print("[ASK] files:", files, flush=True)
+        print("[ASK] files 개수:", len(files), flush=True)
+        for idx, file_doc in enumerate(files):
+            print(f"[ASK] file_doc[{idx}].filename: {file_doc['filename']}", flush=True)
+            print(f"[ASK] file_doc[{idx}].text 앞 100자: {file_doc['text'][:100]}", flush=True)
         file_context = "\n".join(file_doc["text"] for file_doc in files if "text" in file_doc)
+        file_context = file_context[:2000]  # 너무 길면 잘라내기
         print("[ASK] file_context:", repr(file_context[:500]), flush=True)
 
-        # ... 기존 get_context_and_fields 코드 ...
         context, field_names = get_context_and_fields(req.question)
 
-        # ... prompt와 GPT 호출에서 context → full_context 사용 ...
         prompt = ""
         if file_context:
             prompt += (
@@ -305,7 +307,6 @@ async def ask(req: QuestionRequest):
             f"질문과 관련 없는 문서는 제외하세요.\n"
             f"답변을 할 때는 반드시 자연스러운 한국어 띄어쓰기를 모두 적용해서 출력하세요. 붙여쓰기가 있는 부분은 전부 띄어쓰기를 바로잡아 주세요.\n"
         )
-
 
         print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}", flush=True)
 
