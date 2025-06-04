@@ -292,15 +292,14 @@ async def upload_file(session_id: str = Form(...), file: UploadFile = File(...))
 
     print(f"[UPLOAD] 최종 extracted_text(앞 200글자): {extracted_text[:200]}", flush=True)
 
-    chatbot_db.uploaded_files.update_one(
-        {"session_id": session_id},
-        {"$set": {
-            "text": extracted_text,
-            "filename": filename,
-            "uploaded_at": datetime.utcnow()
-        }},
-        upsert=True
-    )
+    chatbot_db.uploaded_files.insert_one({
+        "session_id": session_id,
+        "text": extracted_text,
+        "filename": filename,
+        "uploaded_at": datetime.utcnow()
+    })
+    upsert=True
+    
     print("[UPLOAD] MongoDB 저장 완료", flush=True)
     return {"msg": "MongoDB 저장 성공", "text_length": len(extracted_text)}
 
@@ -314,8 +313,8 @@ chatbot_db.uploaded_files.create_index(
 async def ask(req: QuestionRequest):
     try:
         # 파일에서 추출된 텍스트 가져오기
-        file_doc = chatbot_db.uploaded_files.find_one({"session_id": req.session_id})
-        file_context = file_doc["text"] if file_doc and "text" in file_doc else ""
+        files = list(chatbot_db.uploaded_files.find({"session_id": req.session_id}))
+        file_context = "\n".join(file_doc["text"] for file_doc in files if "text" in file_doc)
         
         print(f"[ASK] file_context(앞 500글자):\n{file_context[:500]}")
 
