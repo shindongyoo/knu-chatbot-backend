@@ -202,7 +202,7 @@ async def stream_answer(req: Request):
             delta = getattr(chunk.choices[0].delta, "content", "") or ""
             buffer += delta
             # 예시) 문장 끝(마침표 등) 기준으로 적당히 flush
-            if buffer.endswith(("다.", "\n")) or len(buffer) > 50:
+            if buffer.endswith(("다.", "\n")) or len(buffer) > 5:
                 yield f"data: {buffer}\n\n"
                 buffer = ""
         if buffer:
