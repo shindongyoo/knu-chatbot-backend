@@ -314,7 +314,9 @@ async def ask(req: QuestionRequest):
     try:
         # 파일에서 추출된 텍스트 가져오기
         files = list(chatbot_db.uploaded_files.find({"session_id": req.session_id}))
+        print("[ASK] files:", files, flush=True)
         file_context = "\n".join(file_doc["text"] for file_doc in files if "text" in file_doc)
+        print("[ASK] file_context:", repr(file_context[:500]), flush=True)
         
         print(f"[ASK] file_context(앞 500글자):\n{file_context[:500]}")
 
