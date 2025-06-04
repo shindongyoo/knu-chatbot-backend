@@ -197,18 +197,16 @@ async def stream_answer(req: Request):
             stream=True
         )
         # 여기서 한글자씩 yield하지 않고, 누적만 하다가 마지막에 yield!
+        buffer = ""
         for chunk in response:
             delta = getattr(chunk.choices[0].delta, "content", "") or ""
-            full_answer += delta
-        # 다 모인 후 한 번만 yield!
-        yield f"data: {full_answer}\n\n"
-
-        # (아래는 그대로)
-        r.rpush(f"chat:{session_id}", json.dumps({
-            "timestamp": datetime.utcnow().isoformat(),
-            "question": question,
-            "answer": full_answer
-        }))
+            buffer += delta
+            # 예시) 문장 끝(마침표 등) 기준으로 적당히 flush
+            if buffer.endswith(("다.", "\n")) or len(buffer) > 50:
+                yield f"data: {buffer}\n\n"
+                buffer = ""
+        if buffer:
+            yield f"data: {buffer}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
