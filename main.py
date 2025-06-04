@@ -288,10 +288,19 @@ async def ask(req: QuestionRequest):
                 f"{file_context}\n"
                 "----- 파일 내용 끝 -----\n\n"
             )
+        if recent:
+            prompt += f"이전 대화 기록:\n{recent}\n\n"
         prompt += (
-            f"아래는 관련 문서 정보입니다:\n{context}\n\n"
-            f"사용자 질문: {req.question}"
+            f"사용자의 질문: '{req.question}'\n\n"
+            f"아래는 관련 문서들의 다양한 정보입니다:\n{context}\n\n"
+            f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}.\n"
+            f"가능한 모든 필드 값을 활용해서 질문에 답변해 주세요.\n"
+            f"특히 lab, phone, email, homepage, url, content 등이 포함되어 있을 경우 반드시 응답에 포함해 주세요.\n"
+            f"문서 제목과 링크도 자연스럽게 포함해 주세요.\n"
+            f"질문과 관련 없는 문서는 제외하세요.\n"
+            f"답변을 할 때는 반드시 자연스러운 한국어 띄어쓰기를 모두 적용해서 출력하세요. 붙여쓰기가 있는 부분은 전부 띄어쓰기를 바로잡아 주세요.\n"
         )
+
 
         print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}", flush=True)
 
