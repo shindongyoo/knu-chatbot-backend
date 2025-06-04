@@ -9,6 +9,8 @@ kiwipiepy
 pillow
 pytesseract
 PyPDF2
+python-multipart
+
 #keybert
 #scikit-learn
 #sentence-transformers
