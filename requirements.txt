@@ -5,8 +5,11 @@ pymongo
 certifi
 redis
 openai
-#keybert
 kiwipiepy
+pillow
+pytesseract
+PyPDF2
+#keybert
 #scikit-learn
 #sentence-transformers
 #numpy
