@@ -13,6 +13,11 @@ from pydantic import BaseModel
 from openai import OpenAI
 #from keybert import KeyBERT
 #from kiwipiepy import Kiwi
+from fastapi import UploadFile, File, Form
+from PyPDF2 import PdfReader
+from PIL import Image
+import pytesseract
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -240,3 +245,82 @@ async def post_history(req: Request):
 @app.get("/")
 def root():
     return {"message": "KNU Chatbot backend is running"}
+
+UPLOAD_DIR = "./uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)  # 폴더 없으면 자동 생성
+
+@app.post("/upload")
+async def upload_file(session_id: str = Form(...), file: UploadFile = File(...)):
+    filename = file.filename
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    extracted_text = ""
+    try:
+        if filename.lower().endswith(".pdf"):
+            with open(file_path, "rb") as f:
+                reader = PdfReader(f)
+                for page in reader.pages:
+                    txt = page.extract_text() or ""
+                    extracted_text += txt + "\n"
+        elif filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            image = Image.open(file_path)
+            extracted_text = pytesseract.image_to_string(image, lang="kor+eng")
+        else:
+            return JSONResponse(content={"error": "지원하지 않는 파일 형식입니다."}, status_code=400)
+    except Exception as e:
+        return JSONResponse(content={"error": f"파일 처리 중 오류: {e}"}, status_code=400)
+
+    chatbot_db.uploaded_files.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "text": extracted_text,
+            "filename": filename,
+            "uploaded_at": datetime.utcnow()
+        }},
+        upsert=True
+    )
+    return {"msg": "MongoDB 저장 성공", "text_length": len(extracted_text)}
+
+# TTL 인덱스 최초 1회 생성 코드(운영 환경에서는 한 번만 실행!)
+chatbot_db.uploaded_files.create_index(
+    [("uploaded_at", 1)],
+    expireAfterSeconds=3 * 24 * 60 * 60  # 3일
+)
+
+@app.post("/ask", response_class=JSONResponse)
+async def ask(req: QuestionRequest):
+    try:
+        # 파일에서 추출된 텍스트 가져오기
+        file_doc = chatbot_db.uploaded_files.find_one({"session_id": req.session_id})
+        file_context = file_doc["text"] if file_doc and "text" in file_doc else ""
+
+        # ... 기존 get_context_and_fields 코드 ...
+        context, field_names = get_context_and_fields(req.question)
+        full_context = (file_context + "\n" if file_context else "") + context
+
+        # ... prompt와 GPT 호출에서 context → full_context 사용 ...
+        prompt = (
+            f"파일에서 추출된 내용:\n{file_context}\n\n" if file_context else ""
+        ) + (
+            f"아래는 관련 문서 정보입니다:\n{context}\n\n"
+        ) + (
+            f"사용자 질문: {req.question}"
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "너는 친절한 경북대 전기과 졸업요건 안내 챗봇이야."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4
+        )
+        answer = response.choices[0].message.content.strip()
+        print("DEBUG 답변: ", repr(answer))
+        return JSONResponse(content={"answer": answer})
+
+    except Exception as e:
+        print("❗ 예외 발생:", e)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
