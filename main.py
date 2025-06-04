@@ -322,6 +322,7 @@ async def ask(req: QuestionRequest):
         return JSONResponse(content={"answer": answer})
 
     except Exception as e:
-        print("❗ 예외 발생:", e)
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-    
+        import traceback
+        print("파일 업로드/텍스트 추출 중 오류:", e)
+        traceback.print_exc()
+        return JSONResponse(content={"error": f"파일 처리 중 오류: {e}"}, status_code=400)
