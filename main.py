@@ -257,21 +257,44 @@ async def upload_file(session_id: str = Form(...), file: UploadFile = File(...))
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
+    # 1. 파일 저장 전후로 print
+    print(f"[UPLOAD] 업로드 시도: {filename}")
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    print(f"[UPLOAD] 파일 저장 완료: {file_path}")
+    
     extracted_text = ""
     try:
         if filename.lower().endswith(".pdf"):
+            print(f"[UPLOAD] PDF 파일 처리 시작: {file_path}")
             with open(file_path, "rb") as f:
                 reader = PdfReader(f)
                 for page in reader.pages:
                     txt = page.extract_text() or ""
                     extracted_text += txt + "\n"
+            print(f"[UPLOAD] PDF 텍스트 추출 완료")
         elif filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            image = Image.open(file_path)
-            extracted_text = pytesseract.image_to_string(image, lang="kor+eng")
+            print(f"[UPLOAD] 이미지 파일 처리 시작: {file_path}")
+            try:
+                image = Image.open(file_path)
+                print("[UPLOAD] 이미지 열기 성공")
+                extracted_text = pytesseract.image_to_string(image, lang="kor+eng")
+                print("[UPLOAD] OCR 추출 성공")
+            except Exception as e:
+                print("[UPLOAD][IMAGE ERROR]", e)
+                import traceback
+                traceback.print_exc()
+                return JSONResponse(content={"error": f"이미지 처리 중 오류: {e}"}, status_code=400)
         else:
+            print("[UPLOAD][ERROR] 지원하지 않는 파일 형식")
             return JSONResponse(content={"error": "지원하지 않는 파일 형식입니다."}, status_code=400)
     except Exception as e:
+        print("[UPLOAD][ERROR]", e)
+        import traceback
+        traceback.print_exc()
         return JSONResponse(content={"error": f"파일 처리 중 오류: {e}"}, status_code=400)
+
+    print(f"[UPLOAD] 최종 extracted_text(앞 200글자): {extracted_text[:200]}")
 
     chatbot_db.uploaded_files.update_one(
         {"session_id": session_id},
@@ -282,6 +305,7 @@ async def upload_file(session_id: str = Form(...), file: UploadFile = File(...))
         }},
         upsert=True
     )
+    print("[UPLOAD] MongoDB 저장 완료")
     return {"msg": "MongoDB 저장 성공", "text_length": len(extracted_text)}
 
 # TTL 인덱스 최초 1회 생성 코드(운영 환경에서는 한 번만 실행!)
@@ -296,6 +320,8 @@ async def ask(req: QuestionRequest):
         # 파일에서 추출된 텍스트 가져오기
         file_doc = chatbot_db.uploaded_files.find_one({"session_id": req.session_id})
         file_context = file_doc["text"] if file_doc and "text" in file_doc else ""
+        
+        print(f"[ASK] file_context(앞 500글자):\n{file_context[:500]}")
 
         # ... 기존 get_context_and_fields 코드 ...
         context, field_names = get_context_and_fields(req.question)
@@ -309,6 +335,8 @@ async def ask(req: QuestionRequest):
         ) + (
             f"사용자 질문: {req.question}"
         )
+
+        print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}")
 
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
