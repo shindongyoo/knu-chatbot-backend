@@ -251,50 +251,50 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)  # 폴더 없으면 자동 생성
 
 @app.post("/upload")
 async def upload_file(session_id: str = Form(...), file: UploadFile = File(...)):
-    print(f"[UPLOAD] 업로드 요청: session_id={session_id}, filename={file.filename}")
+    print(f"[UPLOAD] 업로드 요청: session_id={session_id}, filename={file.filename}", flush=True)
     filename = file.filename
     file_path = os.path.join(UPLOAD_DIR, filename)
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
     # 1. 파일 저장 전후로 print
-    print(f"[UPLOAD] 업로드 시도: {filename}")
+    print(f"[UPLOAD] 업로드 시도: {filename}", flush=True)
     with open(file_path, "wb") as f:
         f.write(await file.read())
-    print(f"[UPLOAD] 파일 저장 완료: {file_path}")
+    print(f"[UPLOAD] 파일 저장 완료: {file_path}", flush=True)
     
     extracted_text = ""
     try:
         if filename.lower().endswith(".pdf"):
-            print(f"[UPLOAD] PDF 파일 처리 시작: {file_path}")
+            print(f"[UPLOAD] PDF 파일 처리 시작: {file_path}", flush=True)
             with open(file_path, "rb") as f:
                 reader = PdfReader(f)
                 for page in reader.pages:
                     txt = page.extract_text() or ""
                     extracted_text += txt + "\n"
-            print(f"[UPLOAD] PDF 텍스트 추출 완료")
+            print(f"[UPLOAD] PDF 텍스트 추출 완료", flush=True)
         elif filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            print(f"[UPLOAD] 이미지 파일 처리 시작: {file_path}")
+            print(f"[UPLOAD] 이미지 파일 처리 시작: {file_path}", flush=True)
             try:
                 image = Image.open(file_path)
-                print("[UPLOAD] 이미지 열기 성공")
+                print("[UPLOAD] 이미지 열기 성공", flush=True)
                 extracted_text = pytesseract.image_to_string(image, lang="kor+eng")
-                print("[UPLOAD] OCR 추출 성공")
+                print("[UPLOAD] OCR 추출 성공", flush=True)
             except Exception as e:
-                print("[UPLOAD][IMAGE ERROR]", e)
+                print("[UPLOAD][IMAGE ERROR]", e, flush=True)
                 import traceback
                 traceback.print_exc()
                 return JSONResponse(content={"error": f"이미지 처리 중 오류: {e}"}, status_code=400)
         else:
-            print("[UPLOAD][ERROR] 지원하지 않는 파일 형식")
+            print("[UPLOAD][ERROR] 지원하지 않는 파일 형식", flush=True)
             return JSONResponse(content={"error": "지원하지 않는 파일 형식입니다."}, status_code=400)
     except Exception as e:
-        print("[UPLOAD][ERROR]", e)
+        print("[UPLOAD][ERROR]", e, flush=True)
         import traceback
         traceback.print_exc()
         return JSONResponse(content={"error": f"파일 처리 중 오류: {e}"}, status_code=400)
 
-    print(f"[UPLOAD] 최종 extracted_text(앞 200글자): {extracted_text[:200]}")
+    print(f"[UPLOAD] 최종 extracted_text(앞 200글자): {extracted_text[:200]}", flush=True)
 
     chatbot_db.uploaded_files.update_one(
         {"session_id": session_id},
@@ -305,7 +305,7 @@ async def upload_file(session_id: str = Form(...), file: UploadFile = File(...))
         }},
         upsert=True
     )
-    print("[UPLOAD] MongoDB 저장 완료")
+    print("[UPLOAD] MongoDB 저장 완료", flush=True)
     return {"msg": "MongoDB 저장 성공", "text_length": len(extracted_text)}
 
 # TTL 인덱스 최초 1회 생성 코드(운영 환경에서는 한 번만 실행!)
