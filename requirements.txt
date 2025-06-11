@@ -10,6 +10,8 @@ pillow
 pytesseract
 PyPDF2
 python-multipart
+faiss-cpu
+
 
 #keybert
 #scikit-learn

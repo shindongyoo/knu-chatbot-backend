@@ -10,7 +10,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from openai import OpenAI
 #from keybert import KeyBERT
 #from kiwipiepy import Kiwi
 from fastapi import UploadFile, File, Form
@@ -18,12 +17,12 @@ from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
 from datetime import datetime
+from search_engine import search_similar_documents, client
+
 
 # Load environment variables
 load_dotenv()
 
-# OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # MongoDB setup
 MONGO_URI = os.getenv("MONGO_URI")
@@ -67,59 +66,11 @@ class QuestionRequest(BaseModel):
 def extract_keywords_korean(question: str, top_n=5) -> list:
     return [question.strip()]
 
-
 def get_context_and_fields(question: str):
-    keywords = extract_keywords_korean(question)
-    regex = '|'.join(keywords)
-
-    collections = chatbot_db.list_collection_names()
-    unique_results = {}
-    all_docs = []
-
-    for coll_name in collections:
-        coll = chatbot_db[coll_name]
-        docs = coll.find({
-            "$or": [
-                {field: {"$regex": regex, "$options": "i"}} for field in [
-                    "title", "content", "name", "position", "major", "section",
-                    "body", "date", "type", "phone", "email", "homepage", "lab"
-                ]
-            ]
-        })
-        for doc in docs:
-            key = str(doc.get("_id", ""))
-            if key not in unique_results:
-                unique_results[key] = True
-                all_docs.append(doc)
-
-    MAX_DOCS = 10
-    priority_docs, other_docs = [], []
-    for doc in all_docs:
-        combined_text = " ".join([
-            doc.get("name", ""), doc.get("title", ""),
-            doc.get("body", ""), doc.get("content", "")
-        ])
-        if any(k in combined_text for k in keywords):
-            priority_docs.append(doc)
-        else:
-            other_docs.append(doc)
-
-    selected_docs = (priority_docs + other_docs)[:MAX_DOCS]
-
-    context = ""
-    field_names = set()
-    for doc in selected_docs:
-        context += "- 문서 정보:\n"
-        for key, value in doc.items():
-            if value:
-                context += f"  {key}: {value}\n"
-                field_names.add(key)
-        context += "|\n"
-
-    return context, field_names
+    return search_similar_documents(question, top_k=5)
 
 # 최근 대화 불러오기 함수 (마지막 n개 Q/A)
-def get_recent_history(session_id: str, n=4) -> str:
+def get_recent_history(session_id: str, n=3) -> str:
     key = f"chat:{session_id}"
     logs = r.lrange(key, -n, -1)  # 마지막 n개
     dialogue = []
@@ -141,8 +92,9 @@ async def stream_answer(req: Request):
     question = body.get("question")
 
     # 최근 대화 내역
-    recent = get_recent_history(session_id, n=4)
+    recent = get_recent_history(session_id, n=3)
     context, field_names = get_context_and_fields(question)
+    context = context[:1000]
     
     # 업로드 파일에서 추출된 텍스트 읽기
     files = list(chatbot_db.uploaded_files.find({"session_id": session_id}))
@@ -158,12 +110,11 @@ async def stream_answer(req: Request):
                 f"{file_context}\n"
                 "----- 파일 내용 끝 -----\n\n"
             )
-        prompt += (
-            (f"이전 대화 기록:\n{recent}\n\n" if recent else "") +
-            f"사용자의 질문: '{question}'\n\n"
-            f"{context}\n\n"
-            f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}."
-        )
+        prompt += f"이전 대화 기록:\n{recent}\n\n" if recent else ""
+        prompt += f"사용자의 질문: '{question}'\n\n"
+        prompt += f"{context}\n\n"
+        prompt += f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}.\n"
+
 
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -285,14 +236,14 @@ chatbot_db.uploaded_files.create_index(
 @app.post("/ask", response_class=JSONResponse)
 async def ask(req: QuestionRequest):
     try:
-        recent = get_recent_history(req.session_id, n=4)
+        recent = get_recent_history(req.session_id, n=3)
         files = list(chatbot_db.uploaded_files.find({"session_id": req.session_id}))
         print("[ASK] files 개수:", len(files), flush=True)
         for idx, file_doc in enumerate(files):
             print(f"[ASK] file_doc[{idx}].filename: {file_doc['filename']}", flush=True)
             print(f"[ASK] file_doc[{idx}].text 앞 100자: {file_doc['text'][:100]}", flush=True)
         file_context = "\n".join(file_doc["text"] for file_doc in files if "text" in file_doc)
-        file_context = file_context[:2000]  # 너무 길면 잘라내기
+        file_context = file_context[:1000]  # 너무 길면 잘라내기
         print("[ASK] file_context:", repr(file_context[:500]), flush=True)
 
         context, field_names = get_context_and_fields(req.question)
@@ -316,6 +267,8 @@ async def ask(req: QuestionRequest):
             f"문서 제목과 링크도 자연스럽게 포함해 주세요.\n"
             f"질문과 관련 없는 문서는 제외하세요.\n"
             f"답변을 할 때는 반드시 자연스러운 한국어 띄어쓰기를 모두 적용해서 출력하세요. 붙여쓰기가 있는 부분은 전부 띄어쓰기를 바로잡아 주세요.\n"
+            f"답변할때 최대 토큰안에 답변할 수 있도록 요약해줘.\n"
+            f"본문과 표의 내용이 길 경우 일부 내용만 요약됩니다. 너무 길면 앞부분만 참고하여 요약하세요.\n"
         )
 
         print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}", flush=True)
