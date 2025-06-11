@@ -11,7 +11,7 @@ pytesseract
 PyPDF2
 python-multipart
 faiss-cpu
-
+tenacity
 
 #keybert
 #scikit-learn
