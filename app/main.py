@@ -17,12 +17,15 @@ from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
 from datetime import datetime
-from search_engine import search_similar_documents, client
+from .search_engine import search_similar_documents
+import openai
 
 
 # Load environment variables
 load_dotenv()
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # MongoDB setup
 MONGO_URI = os.getenv("MONGO_URI")
