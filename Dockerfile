@@ -26,4 +26,4 @@ COPY ./app /app
 
 # CMD ["uvicorn", "main:app", ...] (X)
 # uvicorn이 실행할 파일의 위치가 app.main:app으로 변경됨
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -12,6 +12,10 @@ PyPDF2
 python-multipart
 faiss-cpu
 tenacity
+langchain
+langchain-community
+langchain-openai
+langchain-core
 
 #keybert
 #scikit-learn
