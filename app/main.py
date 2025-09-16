@@ -90,6 +90,55 @@ def save_chat_history(session_id: str, question: str, answer: str):
 def root():
     return {"message": "KNU Chatbot backend is running"}
 
+# 아래 코드를 @app.post("/ask") 위에 붙여넣으세요.
+
+@app.post("/stream")
+async def stream_answer(req: QuestionRequest):
+    question = req.question
+    session_id = req.session_id
+
+    def event_generator():
+        try:
+            recent = get_recent_history(session_id)
+            context, _ = search_similar_documents(question)
+            
+            prompt = f"""당신은 경북대학교에 대한 질문에 답변하는 친절한 챗봇입니다. 아래 제공된 '검색된 참고 자료'를 바탕으로 사용자의 질문에 답변해주세요. 자료에 없는 내용은 답변하지 마세요.
+            ### 이전 대화 기록:
+            {recent}
+            ### 검색된 참고 자료:
+            {context}
+            ### 사용자의 질문:
+            {question}
+            ### 답변:
+            """
+            
+            # OpenAI API 호출 (최신 v1.x 스트리밍 방식)
+            stream = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "당신은 경북대학교 지식 기반 챗봇입니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True
+            )
+
+            collected_answer = ""
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    collected_answer += delta
+                    # 프론트엔드로 데이터 전송
+                    yield f"data: {json.dumps({'text': delta})}\n\n"
+            
+            save_chat_history(session_id, question, collected_answer)
+
+        except Exception as e:
+            print(f"스트리밍 중 오류 발생: {e}")
+            error_message = json.dumps({"error": "답변 생성 중 오류가 발생했습니다."})
+            yield f"data: {error_message}\n\n"
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 @app.post("/ask")
 async def ask(req: QuestionRequest):
     try:
