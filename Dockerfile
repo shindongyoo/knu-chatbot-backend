@@ -21,10 +21,8 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # vector_store 폴더를 복사
 COPY ./vector_store /app/vector_store
 
-# [변경점 1] app 폴더 자체를 /app 폴더의 하위 폴더로 복사
-# 이렇게 하면 컨테이너 내부에 /app/app/main.py 구조가 만들어집니다.
+# app 폴더를 /app 폴더의 하위 폴더로 복사, 컨테이너 내부에 /app/app/main.py 구조
 COPY ./app /app/app
 
-# [변경점 2] uvicorn 실행 명령어를 원래대로 되돌림
-# 이제 /app 폴더에서 app.main 모듈을 정상적으로 찾을 수 있습니다.
+# uvicorn 실행 명령어를 원래대로 되돌려 /app 폴더에서 app.main 모듈 find
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

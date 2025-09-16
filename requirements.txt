@@ -1,10 +1,24 @@
+# requirements.txt (최신 안정 최종판)
+
 fastapi
 uvicorn
 python-dotenv
 pymongo
 certifi
 redis
-openai
+pydantic>=2.0
+
+# --- OpenAI & Tiktoken (최신 버전) ---
+openai>=1.23.0
+tiktoken
+
+# --- LangChain 관련 라이브러리 (최신 안정 버전) ---
+langchain==0.2.1
+langchain-community==0.2.1
+langchain-openai==0.1.8
+langchain-core==0.2.3
+
+# --- 기타 ---
 kiwipiepy
 pillow
 pytesseract
@@ -12,12 +26,3 @@ PyPDF2
 python-multipart
 faiss-cpu
 tenacity
-langchain
-langchain-community
-langchain-openai
-langchain-core
-
-#keybert
-#scikit-learn
-#sentence-transformers
-#numpy

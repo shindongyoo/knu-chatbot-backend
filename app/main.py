@@ -5,6 +5,18 @@ import certifi
 import redis
 from datetime import datetime
 from dotenv import load_dotenv
+# .env 파일을 로드하고 성공 여부를 변수에 저장합니다.
+load_success = load_dotenv()
+
+# 환경 변수에서 OPENAI_API_KEY를 가져옵니다.
+api_key = os.getenv("OPENAI_API_KEY")
+
+# 터미널에 디버깅 정보를 출력합니다.
+print("--- 디버깅 정보 ---")
+print(f".env 파일 로드 성공 여부: {load_success}")
+print(f"읽어온 OPENAI_API_KEY 값: {api_key}")
+print("--------------------")
+# --- 디버깅 코드 끝 ---
 from pymongo import MongoClient
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +29,7 @@ from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
 from datetime import datetime
-from .search_engine import search_similar_documents
+from app.search_engine import search_similar_documents
 import openai
 
 
@@ -25,7 +37,7 @@ import openai
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY # openai 0.28.1 방식
 
 # MongoDB setup
 MONGO_URI = os.getenv("MONGO_URI")
@@ -119,7 +131,7 @@ async def stream_answer(req: Request):
         prompt += f"각 문서에는 다음과 같은 정보가 포함되어 있습니다: {', '.join(sorted(field_names))}.\n"
 
 
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create( # openai 0.28.1 방식
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "너는 친절한 경북대 전기과 졸업요건 안내 챗봇이야."},
@@ -276,7 +288,7 @@ async def ask(req: QuestionRequest):
 
         print(f"[ASK] prompt(앞 800글자):\n{prompt[:800]}", flush=True)
 
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create( # openai 0.28.1 방식
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "너는 친절한 경북대 전기과 안내 챗봇이야. 만약 프롬프트에 '파일에서 추출된 내용'이 있다면 반드시 그 내용을 참고해서 답변해라."},
@@ -284,7 +296,8 @@ async def ask(req: QuestionRequest):
             ],
             temperature=0.4
         )
-        answer = response.choices[0].message.content.strip()
+        # answer = response.choices[0].message.content.strip() # 이 부분도 수정 필요
+        answer = response['choices'][0]['message']['content'].strip() # openai 0.28.1 방식
         print("DEBUG 답변: ", repr(answer))
         return JSONResponse(content={"answer": answer})
 

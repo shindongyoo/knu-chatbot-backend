@@ -1,1 +1,29 @@
+# Python Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Sensitive Information
 .env
+*.env
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Temporary files
+uploads/
+*.log
+
+# Temporary scripts we created (optional, but good to ignore)
+inspector.py
+check_pkl.py
+create_db.py
+requirements_old.txt
