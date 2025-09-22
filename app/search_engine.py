@@ -40,6 +40,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 notices_title_db = None
 notices_content_db = None # 본문 DB를 위한 새 변수
 jobs_db = None
+members_db = None
 
 # 공지사항 '제목' DB 로딩
 try:
@@ -67,17 +68,56 @@ try:
     print("✅ Jobs Vector DB 로딩 성공.")
 except Exception as e:
     print(f"❌ Jobs Vector DB 로딩 실패: {e}")
+    
+try:
+    MEMBERS_DB_DIR = os.path.join(BASE_DIR, '..', 'vector_store', 'members')
+    members_db = load_vector_db_manually(MEMBERS_DB_DIR, "members_index")
+    print("✅ Members Vector DB 로딩 성공.")
+except Exception as e:
+    print(f"❌ Members Vector DB 로딩 실패: {e}")
 
 
 # --- 3. 라우터 함수 수정 ---
 def route_query_to_db(query: str):
-    job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "구인", "모집", "공고", "일자리"]
+    """
+    사용자 질문의 키워드를 분석하여 가장 적절한 Vector DB(들)을 선택하여 반환합니다.
+    """
+    # 1. 각 데이터베이스의 역할을 명확히 하는 키워드 목록 정의
+    
+    # members_db 키워드: 인물, 장소, 연락처 등 고유명사 정보
+    member_keywords = [
+        "교수", "교수님", "조교", "교직원", "연구실", "사무실", "이메일", 
+        "연락처", "전화번호", "위치", "어디", "호관", "호실", "강의실"
+    ]
+    
+    # jobs_db 키워드: 채용, 경력 관련 정보
+    job_keywords = [
+        "취업", "인턴", "채용", "회사", "직무", "자소서", "면접", 
+        "구인", "모집", "공고", "일자리", "커리어", "경력"
+    ]
+
+    # notices_db 키워드: 학사, 행정, 장학금 등 일반 정보
+    notice_keywords = [
+        "공지", "장학금", "등록금", "신청", "기간", "제출", "마감", "안내",
+        "졸업", "요건", "학점", "수강", "과목", "교과", "과정", "이수", "요람"
+    ]
+
+    # 2. 라우팅 로직: 더 구체적인 질문부터 확인 (교수/장소 -> 취업 -> 일반공지)
+
+    # 1순위: 구성원 또는 장소 관련 질문인지 확인
+    if any(keyword in query for keyword in member_keywords):
+        print(f"[🔍 DB 라우팅] '{query}' -> 구성원/장소 정보 DB 선택")
+        return (members_db,) if members_db else (notices_content_db,)
+
+    # 2순위: 취업 관련 질문인지 확인
     if any(keyword in query for keyword in job_keywords):
-        # 취업 질문은 jobs_db만 사용
-        return (jobs_db,) if jobs_db else (notices_content_db,) # 항상 튜플 형태로 반환
-    else:
-        # 공지사항 질문은 제목 DB와 본문 DB를 모두 사용
-        return (notices_title_db, notices_content_db)
+        print(f"[🔍 DB 라우팅] '{query}' -> 취업 정보 DB 선택")
+        return (jobs_db,) if jobs_db else (notices_content_db,)
+    
+    # 3순위: 일반 공지 및 학사 관련 질문은 공지사항 DB 검색 (제목+본문)
+    # (위 두 경우에 해당하지 않는 모든 질문은 여기로 옵니다)
+    print(f"[🔍 DB 라우팅] '{query}' -> 공지사항 DB 선택 (제목+본문)")
+    return (notices_title_db, notices_content_db)
 
 # --- 4. 메인 검색 함수 수정 ---
 def search_similar_documents(query: str, top_k: int = 5):
