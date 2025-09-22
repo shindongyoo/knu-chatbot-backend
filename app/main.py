@@ -1,5 +1,4 @@
-# app/main.py (최신 버전 최종 완성본)
-
+# app/main.py
 import os
 import json
 import certifi
@@ -16,6 +15,7 @@ from PIL import Image
 import pytesseract
 import openai
 import time
+from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 
 load_dotenv()
 from app.search_engine import search_similar_documents
@@ -206,3 +206,75 @@ async def get_sessions(user_id: str):
         return JSONResponse(content={"sessions": sessions_with_titles})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+# ▼▼▼ 이 함수 전체를 복사해서 붙여넣으세요 ▼▼▼
+@app.get("/history/{session_id}")
+async def get_chat_history(
+    session_id: str,
+    user_id: str,
+    cursor: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """
+    특정 세션의 대화 기록을 페이지네이션으로 불러옵니다.
+    소유권 확인을 위해 user_id가 필요합니다.
+    """
+    if not r:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Redis service is unavailable"}
+        )
+
+    try:
+        # 1. 소유권 확인: 이 session_id가 해당 user_id의 세션 목록에 있는지 확인
+        session_key = f"user:{user_id}:sessions_sorted"
+        if r.zscore(session_key, session_id) is None:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Forbidden: You do not have access to this session."}
+            )
+
+        # 2. 페이지네이션을 위해 Redis list에서 데이터 슬라이싱
+        chat_key = f"chat:{session_id}"
+        start_index = cursor
+        end_index = cursor + limit - 1
+        logs_raw = r.lrange(chat_key, start_index, end_index)
+
+        # 3. 데이터 형식 변환: [{"question":...}, {"answer":...}] -> [{"role":"user",...}, {"role":"assistant",...}]
+        messages = []
+        for item_raw in logs_raw:
+            item = json.loads(item_raw)
+            question = item.get("question")
+            answer = item.get("answer")
+            timestamp = item.get("timestamp")
+
+            if question:
+                messages.append({"role": "user", "text": question, "timestamp": timestamp})
+            if answer:
+                messages.append({"role": "assistant", "text": answer, "timestamp": timestamp})
+
+        # 4. 다음 페이지 커서 계산
+        next_cursor = None
+        # 요청한 limit만큼의 데이터를 성공적으로 가져왔다면, 다음 페이지가 있을 수 있음
+        if len(logs_raw) == limit:
+            new_cursor = cursor + limit
+            # 전체 로그 개수를 확인하여 다음 페이지가 실제로 있는지 최종 확인
+            total_logs = r.llen(chat_key)
+            if new_cursor < total_logs:
+                next_cursor = new_cursor
+
+        # 5. 최종 응답 반환
+        return JSONResponse(content={
+            "session_id": session_id,
+            "messages": messages,
+            "next_cursor": next_cursor
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"An unexpected error occurred: {e}"}
+        )
