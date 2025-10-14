@@ -3,19 +3,19 @@ import os
 import json
 import certifi
 import redis
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+import openai
+
 from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
-import openai
-import time
-from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 
 load_dotenv()
 
@@ -28,6 +28,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 mongo_client = MongoClient(MONGO_URI, tls=True, tlsCAFile=certifi.where())
 chatbot_db = mongo_client.chatbot_database
 
+# MongoDB가 초기화된 후 search_engine을 import
 from app.search_engine import search_similar_documents
 
 # Redis 설정
@@ -98,8 +99,6 @@ def save_chat_history(user_id: str, session_id: str, question: str, answer: str)
 def root():
     return {"message": "KNU Chatbot backend is running"}
 
-# 아래 코드를 @app.post("/ask") 위에 붙여넣으세요.
-
 @app.post("/stream")
 async def stream_answer(req: QuestionRequest):
     question = req.question
@@ -138,8 +137,10 @@ async def stream_answer(req: QuestionRequest):
                     {"role": "system", "content": "당신은 경북대학교 지식 기반 챗봇입니다."},
                     {"role": "user", "content": prompt}
                 ],
-                stream=True
+                stream=True,
+                temperature=0.2
             )
+                
 
             collected_answer = ""
             for chunk in stream:
