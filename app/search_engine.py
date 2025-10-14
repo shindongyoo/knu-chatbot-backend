@@ -1,5 +1,3 @@
-# app/search_engine.py (최신 라이브러리 호환 최종 완성본)
-
 import os
 import re
 import faiss
@@ -10,8 +8,10 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_community.docstore.in_memory import InMemoryDocstore
 
-# ▼▼▼ [수정] main.py 대신 database.py에서 chatbot_db를 가져옵니다. ▼▼▼
-from app.database import chatbot_db
+# database.py에서 chatbot_db를 가져옵니다.
+from app.database import chatbot_db 
+
+load_dotenv()
 
 # --- 1. Vector DB 로딩 및 임베딩 모델 초기화 ---
 
@@ -34,15 +34,17 @@ def load_vector_db_manually(folder_path, index_name):
     docstore = InMemoryDocstore({str(i): doc for i, doc in enumerate(documents)})
     index_to_docstore_id = {i: str(i) for i in range(len(documents))}
 
-    # LangChain 최신 버전에 맞는 인자 이름('embedding') 사용
+    # ▼▼▼ [가장 중요한 수정] ▼▼▼
+    # 'embedding' 대신 'embedding_function'을 사용합니다.
+    # 이 방식은 옛날 버전과 최신 버전 모두에서 작동합니다.
     return LangChainFAISS(
-        embedding=embeddings,
+        embedding_function=embeddings,
         index=index,
         docstore=docstore,
         index_to_docstore_id=index_to_docstore_id
     )
 
-# Vector DB 로딩 (members_db는 로드하지 않습니다)
+# Vector DB 로딩
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 notices_title_db = None
 notices_content_db = None
@@ -73,9 +75,6 @@ except Exception as e:
 # --- 2. MongoDB에서 구성원 정보 검색 함수 ---
 
 def search_members_in_mongodb(query: str):
-    """
-    질문에서 인물 이름을 추출하여 MongoDB에서 검색하고, 결과를 context 문자열로 포맷팅합니다.
-    """
     match = re.search(r'([\w가-힣]{2,4})\s*(교수님|교수|조교|선생님)', query)
     if not match:
         return None
@@ -90,7 +89,6 @@ def search_members_in_mongodb(query: str):
             context += f"  - 직위: {member.get('position', '정보 없음')}\n"
             context += f"  - 연구실: {member.get('lab', '정보 없음')}\n"
             context += f"  - 이메일: {member.get('email', '정보 없음')}\n"
-            context += f"  - 홈페이지: {member.get('homepage', '정보 없음')}\n"
             context += f"  - 전화번호: {member.get('phone', '정보 없음')}\n---\n"
         return context
     return None
@@ -98,20 +96,15 @@ def search_members_in_mongodb(query: str):
 # --- 3. 메인 검색 함수 (라우터 로직 통합) ---
 
 def search_similar_documents(query: str, top_k: int = 5):
-    """
-    질문의 종류를 파악(라우팅)하여 MongoDB 또는 Vector DB에서 정보를 검색합니다.
-    """
     member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님", "사무실", "위치", "호관", "호실"]
     job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
 
-    # 1순위: 구성원 관련 질문이면 MongoDB에서 먼저 검색
     if any(keyword in query for keyword in member_keywords):
         print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 구성원 검색 시도")
         mongo_context = search_members_in_mongodb(query)
         if mongo_context:
             return mongo_context, ['name', 'position', 'lab', 'email', 'phone']
 
-    # 2순위 또는 MongoDB에서 못 찾은 경우: Vector DB 검색
     selected_dbs = None
     if any(keyword in query for keyword in job_keywords):
         print(f"[🔍 DB 라우팅] '{query}' -> 취업 정보 Vector DB 선택")
