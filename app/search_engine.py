@@ -95,7 +95,7 @@ def search_members_in_mongodb(query: str):
 
 # --- 3. 메인 검색 함수 (라우터 로직 통합) ---
 
-def search_similar_documents(query: str, top_k: int = 3):
+def search_similar_documents(query: str, top_k: int = 2):
     member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님", "사무실", "위치", "호관", "호실"]
     job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
 
