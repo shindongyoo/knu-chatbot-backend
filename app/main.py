@@ -12,6 +12,9 @@ from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
 
+from dotenv import load_dotenv
+load_dotenv() # .env 파일을 여기서 먼저 로드합니다.
+
 # --- 서비스 초기화 ---
 # OpenAI 클라이언트 초기화 (최신 v1.x 방식)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
