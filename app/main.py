@@ -79,6 +79,8 @@ def save_chat_history(user_id: str, session_id: str, question: str, answer: str)
 def root():
     return {"message": "KNU Chatbot backend is running"}
 
+# app/main.py의 stream_answer 함수를 이걸로 통째로 덮어쓰세요.
+
 @app.post("/stream")
 async def stream_answer(req: QuestionRequest):
     question = req.question
@@ -87,12 +89,12 @@ async def stream_answer(req: QuestionRequest):
 
     def event_generator():
         try:
-            # ▼▼▼ [문제의 원인] 이 줄이 빠져있었습니다! 다시 추가합니다. ▼▼▼
+            # 이 부분이 빠져서 발생했던 NameError를 해결한 코드입니다.
             recent = get_recent_history(session_id)
             
             context, _ = search_similar_documents(question)
             
-            # 컨텍스트가 너무 길면 강제로 자르는 안전장치
+            # 컨텍스트가 너무 길 경우를 대비한 안전장치
             MAX_CONTEXT_LENGTH = 7000
             if len(context) > MAX_CONTEXT_LENGTH:
                 print(f"⚠️ [경고] 컨텍스트가 너무 깁니다. {len(context)}자를 {MAX_CONTEXT_LENGTH}자로 자릅니다.")
@@ -138,7 +140,7 @@ async def stream_answer(req: QuestionRequest):
             save_chat_history(user_id, session_id, question, collected_answer)
 
         except Exception as e:
-            print(f"!!!!!!!!!!!!!! [진단 실패] 스트림 중 심각한 오류 발생 !!!!!!!!!!!!!!")
+            print(f"!!!!!!!!!!!!!! 스트림 중 심각한 오류 발생 !!!!!!!!!!!!!!")
             import traceback
             traceback.print_exc()
             error_message = json.dumps({"error": "답변 생성 중 오류가 발생했습니다."})
