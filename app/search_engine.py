@@ -10,11 +10,8 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_community.docstore.in_memory import InMemoryDocstore
 
-# main.py에서 초기화된 MongoDB 객체를 가져옵니다.
-# 이 import는 main.py에서 chatbot_db가 정의된 후에 실행되어야 합니다.
-from app.main import chatbot_db 
-
-load_dotenv()
+# ▼▼▼ [수정] main.py 대신 database.py에서 chatbot_db를 가져옵니다. ▼▼▼
+from app.database import chatbot_db
 
 # --- 1. Vector DB 로딩 및 임베딩 모델 초기화 ---
 
@@ -93,6 +90,7 @@ def search_members_in_mongodb(query: str):
             context += f"  - 직위: {member.get('position', '정보 없음')}\n"
             context += f"  - 연구실: {member.get('lab', '정보 없음')}\n"
             context += f"  - 이메일: {member.get('email', '정보 없음')}\n"
+            context += f"  - 홈페이지: {member.get('homepage', '정보 없음')}\n"
             context += f"  - 전화번호: {member.get('phone', '정보 없음')}\n---\n"
         return context
     return None

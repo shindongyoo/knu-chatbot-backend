@@ -1,49 +1,26 @@
 # app/main.py
 import os
 import json
-import certifi
-import redis
 import time
 from datetime import datetime
-from dotenv import load_dotenv
-from pymongo import MongoClient
 from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import openai
-
 from PyPDF2 import PdfReader
 from PIL import Image
 import pytesseract
-
-load_dotenv()
 
 # --- 서비스 초기화 ---
 # OpenAI 클라이언트 초기화 (최신 v1.x 방식)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# MongoDB 설정
-MONGO_URI = os.getenv("MONGO_URI")
-mongo_client = MongoClient(MONGO_URI, tls=True, tlsCAFile=certifi.where())
-chatbot_db = mongo_client.chatbot_database
+# ▼▼▼ [수정] database.py에서 DB 객체들을 import 합니다. ▼▼▼
+from app.database import chatbot_db, r
 
-# MongoDB가 초기화된 후 search_engine을 import
+# ▼▼▼ [수정] DB 초기화가 끝난 후에 search_engine을 import 합니다. ▼▼▼
 from app.search_engine import search_similar_documents
-
-# Redis 설정
-try:
-    r = redis.Redis(
-        host=os.getenv("REDIS_HOST"),
-        port=int(os.getenv("REDIS_PORT")),
-        password=os.getenv("REDIS_PASSWORD"),
-        decode_responses=True
-    )
-    r.ping()
-    print("✅ Redis 연결 성공.")
-except Exception as e:
-    print(f"❌ Redis 연결 실패: {e}")
-    r = None
 
 # FastAPI 앱 설정
 app = FastAPI()
