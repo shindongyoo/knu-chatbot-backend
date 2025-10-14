@@ -91,7 +91,8 @@ def search_members_in_mongodb(query: str):
             context += f"  - 직위: {member.get('position', '정보 없음')}\n"
             context += f"  - 연구실: {member.get('lab', '정보 없음')}\n"
             context += f"  - 이메일: {member.get('email', '정보 없음')}\n"
-            context += f"  - 전공 분야: {member.get('major', '정보 없음')}\n---\n"
+            context += f"  - 전공 분야: {member.get('major', '정보 없음')}\n"
+            context += f"  - 전화번호: {member.get('phone', '정보 없음')}\n---\n"
         return context
     
     return None

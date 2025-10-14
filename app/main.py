@@ -279,3 +279,33 @@ async def get_chat_history(
             status_code=500,
             content={"error": f"An unexpected error occurred: {e}"}
         )
+        
+# main.py 파일에 추가
+
+@app.delete("/delete_session/{session_id}")
+async def delete_session(session_id: str, user_id: str):
+    """
+    특정 세션의 대화 기록을 삭제합니다.
+    소유권 확인을 위해 user_id가 필요합니다.
+    """
+    if not r:
+        return JSONResponse(status_code=503, content={"error": "Redis service is unavailable"})
+
+    try:
+        # 1. 소유권 확인
+        session_list_key = f"user:{user_id}:sessions_sorted"
+        if r.zscore(session_list_key, session_id) is None:
+            return JSONResponse(status_code=403, content={"error": "Forbidden"})
+
+        # 2. 세션 목록에서 해당 session_id 제거
+        r.zrem(session_list_key, session_id)
+
+        # 3. 실제 대화 내용 데이터 삭제
+        chat_key = f"chat:{session_id}"
+        r.delete(chat_key)
+
+        print(f"✅ 세션 삭제 성공: user='{user_id}', session='{session_id}'")
+        return JSONResponse(status_code=200, content={"message": "Session deleted successfully"})
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
