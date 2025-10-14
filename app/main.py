@@ -18,7 +18,6 @@ import time
 from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 
 load_dotenv()
-from app.search_engine import search_similar_documents
 
 # --- 서비스 초기화 ---
 # OpenAI 클라이언트 초기화 (최신 v1.x 방식)
@@ -28,6 +27,8 @@ client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MONGO_URI = os.getenv("MONGO_URI")
 mongo_client = MongoClient(MONGO_URI, tls=True, tlsCAFile=certifi.where())
 chatbot_db = mongo_client.chatbot_database
+
+from app.search_engine import search_similar_documents
 
 # Redis 설정
 try:
