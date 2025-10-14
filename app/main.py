@@ -350,3 +350,29 @@ async def get_latest_session_history(user_id: str):
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+    
+    # app/main.py 파일 맨 아래에 추가하세요.
+
+@app.get("/debug-db-files")
+def debug_db_files():
+    """
+    서버에 배포된 vector_store 폴더의 실제 파일 목록과 크기를 확인하는 진단용 엔드포인트.
+    """
+    base_path = os.path.join(os.path.dirname(__file__), '..', 'vector_store')
+    file_info = {}
+    
+    if not os.path.exists(base_path):
+        return {"error": f"vector_store 폴더를 찾을 수 없습니다: {base_path}"}
+        
+    for root, dirs, files in os.walk(base_path):
+        for name in files:
+            file_path = os.path.join(root, name)
+            try:
+                # 파일 경로에서 /app/ 부분을 기준으로 상대 경로를 만듭니다.
+                relative_path = os.path.relpath(file_path, start=os.path.join(os.path.dirname(__file__), '..'))
+                file_size_bytes = os.path.getsize(file_path)
+                file_info[relative_path] = f"{file_size_bytes} bytes"
+            except Exception as e:
+                file_info[file_path] = f"크기 확인 오류: {e}"
+                
+    return file_info
