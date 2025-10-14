@@ -309,3 +309,44 @@ async def delete_session(session_id: str, user_id: str):
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+# app/main.py 파일에 추가
+
+@app.get("/sessions/latest/{user_id}")
+async def get_latest_session_history(user_id: str):
+    """
+    특정 사용자의 가장 최근 대화 세션 기록 전체를 반환합니다.
+    """
+    if not r:
+        return JSONResponse(status_code=503, content={"error": "Redis service is unavailable"})
+
+    try:
+        # 1. 해당 사용자의 가장 최근 session_id를 1개만 가져옵니다.
+        session_list_key = f"user:{user_id}:sessions_sorted"
+        latest_session_ids = r.zrevrange(session_list_key, 0, 0)
+        
+        if not latest_session_ids:
+            # 이 사용자의 대화 기록이 아예 없는 경우
+            return JSONResponse(content={"session_id": None, "messages": []})
+
+        latest_session_id = latest_session_ids[0]
+
+        # 2. 해당 session_id의 전체 대화 기록을 가져옵니다.
+        chat_key = f"chat:{latest_session_id}"
+        logs_raw = r.lrange(chat_key, 0, -1)
+
+        messages = []
+        for item_raw in logs_raw:
+            item = json.loads(item_raw)
+            question, answer = item.get("question"), item.get("answer")
+            if question: messages.append({"role": "user", "text": question})
+            if answer: messages.append({"role": "assistant", "text": answer})
+
+        # 3. 프론트엔드가 대화를 이어갈 수 있도록 session_id와 메시지 목록을 함께 반환합니다.
+        return JSONResponse(content={
+            "session_id": latest_session_id,
+            "messages": messages
+        })
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
