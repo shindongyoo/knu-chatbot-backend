@@ -102,26 +102,18 @@ async def stream_answer(req: QuestionRequest):
                 # 2. 학번/ABEEK 정보 파싱
                 try:
                     student_id, abeek_status_input = question.strip().split('/')
-                    
-                    # ▼▼▼ 님의 확인 사항을 처리하는 핵심 코드 ▼▼▼
-                    # 'O'/'o'는 "o"로, 'X'/'x'는 "x"로 변환
-                    abeek_query_string = "o" if abeek_status_input.upper() == 'O' else "x"
-                    print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_query_string}")
+                    # 3. MongoDB에 저장된 True/False (불리언) 값으로 변환
+                    abeek_bool_value = True if abeek_status_input.upper() == 'O' else False
+                    print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_bool_value}")
                 
                 except Exception as e:
-                    # 1. 챗봇이 보낼 오류 메시지를 "먼저" 별도의 변수로 만듭니다.
-                    #    여기서는 백슬래시(\)를 사용해도 아무 문제가 없습니다.
+                    # (파싱 실패 로직)
                     error_text = '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 \'18/O\' 형식으로 다시 입력해주세요.'
-                    
-                    # 2. f-string 안에서는 "간단한 변수"만 사용합니다.
-                    #    이제 f-string이 복잡한 따옴표를 해석할 필요가 없습니다.
                     yield f"data: {json.dumps({'text': error_text})}\n\n"
-                    
-                    # 상태는 유지 (r.delete 안 함)
-                    return # 여기서 함수 종료
+                    return
 
-                # 'get_graduation_info' 함수에 'o' 또는 'x'를 전달
-                context = get_graduation_info(student_id, abeek_query_string)
+                # 4. MongoDB 검색 (이제 "18", True 처럼 올바른 값으로 검색)
+                context = get_graduation_info(student_id, abeek_bool_value)
                 
                 # 4. 상태 초기화
                 r.delete(state_key)

@@ -149,6 +149,14 @@ def get_graduation_info(student_id_prefix: str, abeek_status: str):
         #    만약 컬렉션 이름이 다르다면 이 부분을 수정하세요. (예: "graduation")
         collection = chatbot_db["graduation_requirements"] 
         
+        # ▼▼▼ [수정된 부분] ▼▼▼
+        # 2. 님의 DB 필드 이름('year_id', 'abeek')으로 쿼리 수정
+        #    abeek_bool은 이제 True 또는 False 값을 가집니다.
+        query = {
+            "year_id": student_id_prefix,
+            "abeek": abeek_bool 
+        }
+        
         # 2. 님의 DB 필드 이름('year_id', 'abeek')으로 쿼리 수정
         query = {
             "year_id": student_id_prefix,
