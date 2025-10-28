@@ -136,41 +136,32 @@ def search_similar_documents(query: str, top_k: int = 3):
 
     return context, list(field_names)
 
-# app/search_engine.py 파일 맨 아래의 함수를 이걸로 교체
+# app/search_engine.py 파일 맨 아래의 함수 전체를 이걸로 교체하세요.
 
-def get_graduation_info(student_id_prefix: str, abeek_status: str):
+def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     MongoDB의 'graduation_requirements' 컬렉션에서
-    학번(year_id)과 ABEEK 상태(abeek)에 맞는 졸업 요건을 검색합니다.
-    (사용자 DB 스키마에 맞게 수정됨)
+    학번(year_id)과 ABEEK 상태(abeek: true/false)에 맞는 졸업 요건을 검색합니다.
+    (변수 이름 오류 수정됨)
     """
     try:
-        # 1. 컬렉션 이름 확인 (스크린샷에 이름이 없으니, 'graduation_requirements'로 가정)
-        #    만약 컬렉션 이름이 다르다면 이 부분을 수정하세요. (예: "graduation")
+        # 1. 컬렉션 이름 확인 (이전에 확인한 'graduation_requirements' 사용)
         collection = chatbot_db["graduation_requirements"] 
         
-        # ▼▼▼ [수정된 부분] ▼▼▼
-        # 2. 님의 DB 필드 이름('year_id', 'abeek')으로 쿼리 수정
-        #    abeek_bool은 이제 True 또는 False 값을 가집니다.
+        # 2. 'abeek_bool' 파라미터를 사용하여 쿼리 (NameError 해결)
         query = {
             "year_id": student_id_prefix,
             "abeek": abeek_bool 
         }
         
-        # 2. 님의 DB 필드 이름('year_id', 'abeek')으로 쿼리 수정
-        query = {
-            "year_id": student_id_prefix,
-            "abeek": abeek_status.lower() # 'o' 또는 'x'로 검색
-        }
-        
         result = collection.find_one(query)
         
         if result:
-            # 3. 님의 DB 필드 이름으로 context 포맷팅 수정
+            # 3. 'result'와 'abeek_bool' 변수를 사용해 context 포맷팅
             context = f"""
             [검색된 맞춤형 졸업 요건]
             - 대상 학번: {result.get('year_id', 'N/A')}학번
-            - ABEEK 이수 여부: {result.get('abeek', 'N/A').upper()}
+            - ABEEK 이수 여부: {'O' if result.get('abeek') else 'X'}
             - 총 이수 학점: {result.get('total_credit', 'N/A')}학점
             - 전공 학점: {result.get('major_credit', 'N/A')}학점
             - 전공 기초: {result.get('major_basic', 'N/A')}
@@ -179,7 +170,8 @@ def get_graduation_info(student_id_prefix: str, abeek_status: str):
             """
             return context
         else:
-            return f"{student_id_prefix}학번, ABEEK {abeek_status.upper()} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다."
+            # 4. 'abeek_bool' 변수를 사용해 "찾지 못함" 메시지 반환
+            return f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다."
             
     except Exception as e:
         print(f"MongoDB 졸업 요건 검색 오류: {e}")
