@@ -135,3 +135,44 @@ def search_similar_documents(query: str, top_k: int = 3):
         print(f"--- [진단 5/5] 최종 컨텍스트 생성 완료. ---")
 
     return context, list(field_names)
+
+# app/search_engine.py 파일 맨 아래의 함수를 이걸로 교체
+
+def get_graduation_info(student_id_prefix: str, abeek_status: str):
+    """
+    MongoDB의 'graduation_requirements' 컬렉션에서
+    학번(year_id)과 ABEEK 상태(abeek)에 맞는 졸업 요건을 검색합니다.
+    (사용자 DB 스키마에 맞게 수정됨)
+    """
+    try:
+        # 1. 컬렉션 이름 확인 (스크린샷에 이름이 없으니, 'graduation_requirements'로 가정)
+        #    만약 컬렉션 이름이 다르다면 이 부분을 수정하세요. (예: "graduation")
+        collection = chatbot_db["graduation_requirements"] 
+        
+        # 2. 님의 DB 필드 이름('year_id', 'abeek')으로 쿼리 수정
+        query = {
+            "year_id": student_id_prefix,
+            "abeek": abeek_status.lower() # 'o' 또는 'x'로 검색
+        }
+        
+        result = collection.find_one(query)
+        
+        if result:
+            # 3. 님의 DB 필드 이름으로 context 포맷팅 수정
+            context = f"""
+            [검색된 맞춤형 졸업 요건]
+            - 대상 학번: {result.get('year_id', 'N/A')}학번
+            - ABEEK 이수 여부: {result.get('abeek', 'N/A').upper()}
+            - 총 이수 학점: {result.get('total_credit', 'N/A')}학점
+            - 전공 학점: {result.get('major_credit', 'N/A')}학점
+            - 전공 기초: {result.get('major_basic', 'N/A')}
+            - 전공 필수: {result.get('major_required', 'N/A')}
+            - 기타 요건: {result.get('etc', 'N/A')}
+            """
+            return context
+        else:
+            return f"{student_id_prefix}학번, ABEEK {abeek_status.upper()} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다."
+            
+    except Exception as e:
+        print(f"MongoDB 졸업 요건 검색 오류: {e}")
+        return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."

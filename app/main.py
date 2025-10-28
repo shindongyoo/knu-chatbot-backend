@@ -87,19 +87,94 @@ async def stream_answer(req: QuestionRequest):
     session_id = req.session_id
     user_id = req.user_id
 
+# search_engine.py에서 새 함수를 import 합니다. (나중에 만듦)
+    from app.search_engine import get_graduation_info
+
     def event_generator():
         try:
-            # 이 부분이 빠져서 발생했던 NameError를 해결한 코드입니다.
+            # --- 1. 상태 확인 ---
+            # 사용자가 "기다리던" 답변을 했는지 확인
+            state_key = f"state:{session_id}"
+            current_state = r.get(state_key)
+
+            if current_state == "awaiting_grad_info":
+                print(f"[상태 감지] 'awaiting_grad_info' 상태입니다. 입력: {question}")
+                # 2. 학번/ABEEK 정보 파싱
+                try:
+                    student_id, abeek_status_input = question.strip().split('/')
+                    
+                    # ▼▼▼ 님의 확인 사항을 처리하는 핵심 코드 ▼▼▼
+                    # 'O'/'o'는 "o"로, 'X'/'x'는 "x"로 변환
+                    abeek_query_string = "o" if abeek_status_input.upper() == 'O' else "x"
+                    print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_query_string}")
+                
+                except Exception as e:
+                    # ... (파싱 실패 처리) ...
+                    yield f"data: {json.dumps({'text': '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 \'18/O\' 형식으로 다시 입력해주세요.'})}\n\n"
+                    return
+
+                # 'get_graduation_info' 함수에 'o' 또는 'x'를 전달
+                context = get_graduation_info(student_id, abeek_query_string)
+                
+                # 4. 상태 초기화
+                r.delete(state_key)
+
+                # 5. 최종 RAG 답변 생성
+                system_prompt = "당신은 경북대학교 졸업 요건 안내 전문가입니다. 오직 '검색된 졸업 요건' 자료에만 근거하여 사용자에게 맞춤형 졸업 정보를 안내하세요."
+                user_prompt = f"""
+                ### 검색된 졸업 요건:
+                {context if context else "일치하는 졸업 요건을 찾지 못했습니다."}
+
+                ### 사용자의 질문 (요약):
+                {student_id}학번, ABEEK {abeek_status} 학생의 졸업 요건
+                
+                ### 답변:
+                """
+                
+                stream = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    stream=True, temperature=0.2
+                )
+                
+                collected_answer = ""
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        collected_answer += delta
+                        yield f"data: {json.dumps({'text': delta})}\n\n"
+                
+                # 이 대화는 "졸업요건" -> "18/O" -> "답변" 이므로, 원본 질문으로 저장
+                save_chat_history(user_id, session_id, "졸업 요건 알려줘", collected_answer)
+                return # 작업 완료
+
+            # --- 2. "졸업요건" 의도 감지 (새 질문일 경우) ---
+            if "졸업요건" in question or "졸업 요건" in question:
+                print(f"[의도 감지] '졸업요건' 질문을 감지했습니다.")
+                # 3. 상태 설정 (5분간 유효)
+                r.set(state_key, "awaiting_grad_info", ex=300) 
+                
+                # 4. 역질문 전송
+                follow_up_question = "졸업 요건을 확인하기 위해, 학번(예: 18, 19, 20...)과 ABEEK 이수 여부(O/X)를 **'18/O'** 형식으로 입력해주세요."
+                yield f"data: {json.dumps({'text': follow_up_question})}\n\n"
+                
+                # (히스토리 저장은 최종 답변이 올 때 하므로 지금은 하지 않음)
+                return # 작업 완료
+
+            # --- 3. 일반 RAG 질문 처리 (기존 로직) ---
+            print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
+            
             recent = get_recent_history(session_id)
             
+            # (쿼리 변환 로직은 여기에 포함되지 않았습니다. 필요시 추가)
             context, _ = search_similar_documents(question)
             
-            # 컨텍스트가 너무 길 경우를 대비한 안전장치
             MAX_CONTEXT_LENGTH = 7000
             if len(context) > MAX_CONTEXT_LENGTH:
-                print(f"⚠️ [경고] 컨텍스트가 너무 깁니다. {len(context)}자를 {MAX_CONTEXT_LENGTH}자로 자릅니다.")
                 context = context[:MAX_CONTEXT_LENGTH]
-
 
             system_prompt = """당신은 경북대학교 안내 챗봇입니다. 당신의 가장 중요한 임무는 '검색된 참고 자료'를 바탕으로 사용자의 질문에 **'정확하게'** 답변하는 것입니다.
 
