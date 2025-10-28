@@ -79,24 +79,7 @@ def save_chat_history(user_id: str, session_id: str, question: str, answer: str)
 def root():
     return {"message": "KNU Chatbot backend is running"}
 
-# 이 함수를 새로 추가해야 합니다.
-def transform_query(query: str) -> list[str]:
-    """AI를 사용해 사용자의 애매한 질문을 구체적인 검색어로 변환합니다."""
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "당신은 사용자의 질문을 Vector DB에서 검색하기 좋은 구체적인 검색어 3개로 바꾸는 쿼리 변환 전문가입니다. 각 검색어는 쉼표(,)로 구분해서 응답하세요."},
-                {"role": "user", "content": f"다음 질문을 검색어로 바꿔줘: {query}"}
-            ],
-            temperature=0
-        )
-        transformed_queries = response.choices[0].message.content.strip()
-        # "채용 공고, 인턴십, 신입 모집" -> ["채용 공고", "인턴십", "신입 모집"]
-        return [q.strip() for q in transformed_queries.split(',')][:3] # 최대 3개
-    except Exception as e:
-        print(f"쿼리 변환 실패: {e}")
-        return [query] # 실패하면 원래 질문으로 검색
+# app/main.py의 stream_answer 함수를 이걸로 통째로 덮어쓰세요.
 
 @app.post("/stream")
 async def stream_answer(req: QuestionRequest):
@@ -109,26 +92,11 @@ async def stream_answer(req: QuestionRequest):
             # 이 부분이 빠져서 발생했던 NameError를 해결한 코드입니다.
             recent = get_recent_history(session_id)
             
-            # 1. AI를 호출해 질문을 검색어로 변환
-            print(f"원본 질문: {question}")
-            search_queries = transform_query(question)
+            context, _ = search_similar_documents(question)
             
-            # 2. 변환된 모든 검색어로 DB에서 자료를 찾음
-            all_contexts = []
-            for q in search_queries:
-                context, _ = search_similar_documents(q) # top_k=3이라면 총 3*3=9개 검색
-                if context:
-                    all_contexts.append(context)
-            
-            # 3. 모든 검색 결과를 하나로 합침 (중복 제거는 search_engine.py에서 이미 처리됨)
-            final_context = "\n---\n".join(all_contexts)
-            # ▲▲▲ [수정 완료] ▲▲▲
-            
-            # 4. (이후 프롬프트는 그대로...)
-            
-            # 컨텍스트 길이 제한
+            # 컨텍스트가 너무 길 경우를 대비한 안전장치
             MAX_CONTEXT_LENGTH = 7000
-            if len(final_context) > MAX_CONTEXT_LENGTH:
+            if len(context) > MAX_CONTEXT_LENGTH:
                 print(f"⚠️ [경고] 컨텍스트가 너무 깁니다. {len(context)}자를 {MAX_CONTEXT_LENGTH}자로 자릅니다.")
                 context = context[:MAX_CONTEXT_LENGTH]
 
@@ -212,7 +180,6 @@ async def ask(req: QuestionRequest):
             * '검색된 참고 자료' 섹션이 문자 그대로 완전히 비어 있을 경우에도 "죄송합니다, 관련된 정보를 찾을 수 없습니다."라고 답변하세요.
             * **절대 당신의 기존 지식을 사용해서는 안 됩니다.**
         """
-        
         # 2. 'user' 프롬프트에는 질문과 참고 자료(데이터)만 전달합니다.
         user_prompt = f"""
         ### 검색된 참고 자료:
