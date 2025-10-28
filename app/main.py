@@ -109,9 +109,13 @@ async def stream_answer(req: QuestionRequest):
                     print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_query_string}")
                 
                 except Exception as e:
-                    # ... (파싱 실패 처리) ...
-                    yield f"data: {json.dumps({'text': '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 \'18/O\' 형식으로 다시 입력해주세요.'})}\n\n"
-                    return
+                    # 파싱 실패: 다시 물어봄
+                    # (오류 수정: 백슬래시(\') 대신 큰따옴표(")를 사용)
+                    yield f"data: {json.dumps({'text': '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 "18/O" 형식으로 다시 입력해주세요.'})}\n\n"
+                    # ▲▲▲ [수정 완료] ▲▲▲
+                    
+                    # 상태는 유지 (r.delete 안 함)
+                    return # 여기서 함수 종료
 
                 # 'get_graduation_info' 함수에 'o' 또는 'x'를 전달
                 context = get_graduation_info(student_id, abeek_query_string)
@@ -126,7 +130,7 @@ async def stream_answer(req: QuestionRequest):
                 {context if context else "일치하는 졸업 요건을 찾지 못했습니다."}
 
                 ### 사용자의 질문 (요약):
-                {student_id}학번, ABEEK {abeek_status} 학생의 졸업 요건
+                {student_id}학번, ABEEK {abeek_status_input} 학생의 졸업 요건
                 
                 ### 답변:
                 """
