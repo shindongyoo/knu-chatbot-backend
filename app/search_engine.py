@@ -11,7 +11,10 @@ from app.database import chatbot_db
 
 load_dotenv()
 
-embeddings = OpenAIEmbeddings(model="text-embedding-ada-002", openai_api_key=os.getenv("OPENAI_API_KEY"))
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-small",  # <-- "ada-002"에서 변경!
+    openai_api_key=os.getenv("OPENAI_API_KEY")
+)
 
 def load_vector_db_manually(folder_path, index_name):
     faiss_path = os.path.join(folder_path, f"{index_name}.faiss")
