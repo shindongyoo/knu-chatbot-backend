@@ -83,9 +83,16 @@ def search_similar_documents(query: str, top_k: int = 3):
     job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
 
     if any(keyword in query for keyword in member_keywords):
-        # ... (MongoDB 검색 로직은 그대로)
-        pass
-
+        print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 구성원 검색 시도")
+        # 2. MongoDB 검색 함수를 "호출"합니다.
+        mongo_context = search_members_in_mongodb(query)
+        
+        # 3. MongoDB에서 결과를 찾았다면,
+        if mongo_context:
+            print(f"--- [진단 5/5] MongoDB에서 컨텍스트 생성 완료. ---")
+            # 4. 즉시 결과를 "반환"하고 함수를 종료합니다. (Vector DB로 넘어가지 않음)
+            return mongo_context, ['name', 'position', 'lab', 'email', 'phone']
+        
     selected_dbs = None
     if any(keyword in query for keyword in job_keywords):
         print("[진단] 취업 DB를 선택합니다.")
