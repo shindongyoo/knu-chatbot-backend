@@ -145,84 +145,86 @@ import re # re 모듈 import 확인 (없으면 추가)
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (상세 스키마 반영 + 상세 로깅 추가)
+    졸업 요건을 검색합니다. (입력 학번 '20' -> 2020 변환 로직 추가)
     """
-    print("--- [get_graduation_info] 함수 시작 ---") # <-- 추가
     try:
+        # 1. 컬렉션 이름 확인
         collection = chatbot_db["graduation_requirements"] 
-        print(f"--- [get_graduation_info] 컬렉션 '{collection.name}' 선택 완료 ---") # <-- 추가
-
-        search_year = -1 
+        
+        # --- [핵심 수정: 입력 학번 -> 4자리 연도 변환] ---
+        search_year = -1 # 검색에 사용할 4자리 연도
+        
         try:
-            search_year = int(student_id_prefix)
-            print(f"--- [get_graduation_info] 검색 학년: {search_year} ---") # <-- 추가
+            # 2. 사용자 입력 학번(student_id_prefix, 예: "18", "20")을 숫자로 시도
+            year_prefix_num = int(student_id_prefix)
+            
+            # 3. 2자리 숫자이면 앞에 "20"을 붙여 4자리 연도로 만듦
+            if 0 <= year_prefix_num <= 99: # 00 ~ 99 범위의 2자리 수 (또는 1자리)
+                search_year = 2000 + year_prefix_num # 예: 20 -> 2020
+                print(f"[학번 변환] 입력 '{student_id_prefix}' -> 검색 연도 '{search_year}'")
+            else:
+                # 4자리 이상 입력 시 그대로 사용 (예외 처리)
+                search_year = year_prefix_num
+                print(f"[학번 변환] 입력 '{student_id_prefix}'은(는) 4자리 이상이므로 그대로 '{search_year}' 사용")
+
         except ValueError:
+            # 학번이 숫자가 아니면 검색 불가
             print(f"[경고] 입력된 학번 '{student_id_prefix}'을(를) 숫자로 변환할 수 없습니다.")
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
+        # --- [수정 완료] ---
 
+        # MongoDB 쿼리 (abeek 조건만 사용)
         query = { "abeek": abeek_bool }
-        print(f"--- [get_graduation_info] MongoDB 쿼리 실행: {query} ---") # <-- 추가
         all_reqs_for_abeek = list(collection.find(query))
-        print(f"--- [get_graduation_info] 쿼리 결과: {len(all_reqs_for_abeek)}개 문서 찾음 ---") # <-- 추가
         
         result = None 
         
-
+        # 학번 범위 매칭 루프 (이전과 동일)
         print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
         for i, req_doc in enumerate(all_reqs_for_abeek):
             range_str = req_doc.get("applied_year_range", "")
             print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
 
-            start_year, end_year = -1, float('inf')
+            range_start_year = -1
+            range_end_year = float('inf') 
 
             try:
-                range_parts = re.findall(r'\d+', range_str)
+                year_numbers = re.findall(r'\d+', range_str)
 
-                temp_start = -1
-                temp_end = float('inf')
+                if len(year_numbers) == 1: 
+                    range_start_year = int(year_numbers[0])
+                elif len(year_numbers) == 2: 
+                    range_start_year = int(year_numbers[0])
+                    range_end_year = int(year_numbers[1])
 
-                if len(range_parts) == 1:
-                    temp_start = int(range_parts[0])
-                elif len(range_parts) == 2:
-                    temp_start = int(range_parts[0])
-                    temp_end = int(range_parts[1])
+                print(f"    -> 파싱된 범위: Start={range_start_year}, End={range_end_year}, 검색 연도={search_year}")
 
-                print(f"    -> 파싱된 값: start={temp_start} (타입: {type(temp_start)}), end={temp_end} (타입: {type(temp_end)}), search={search_year} (타입: {type(search_year)})")
+                # 핵심 비교 로직 (이제 search_year는 4자리)
+                is_after_start = (range_start_year <= search_year)
+                is_before_end = (search_year <= range_end_year)
+                is_match = is_after_start and is_before_end
 
-                start_year = temp_start
-                end_year = temp_end
-
-                # ▼▼▼ [핵심 수정: 원래의 올바른 비교 로직으로 복귀 + 로그 레이블 수정] ▼▼▼
-                is_start_ok = (start_year <= search_year) # 올바른 비교
-                is_end_ok = (search_year <= end_year)   # 올바른 비교
-                is_match = is_start_ok and is_end_ok
-
-                # 올바른 비교 결과를 출력하도록 레이블 수정
-                print(f"    -> 비교 결과: ({start_year} <= {search_year}) = {is_start_ok}, ({search_year} <= {end_year}) = {is_end_ok}, 최종 매칭 = {is_match}")
-                # ▲▲▲ [핵심 수정 완료] ▲▲▲
+                print(f"    -> 비교 결과: ({range_start_year} <= {search_year}) = {is_after_start}, ({search_year} <= {range_end_year}) = {is_before_end}, 최종 매칭 = {is_match}")
 
                 if is_match:
                     result = req_doc
                     print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
-                    break
+                    break 
                 else:
                     print(f"    -> ❌ 매칭 실패.")
 
             except Exception as parse_error:
                 print(f"    -> ⚠️ 파싱 오류 발생: {parse_error}")
-                continue
+                continue 
         
-        print("--- [get_graduation_info] 학번 범위 매칭 완료 ---") # <-- 추가
-
+        # Context 생성 및 반환 (이전과 동일)
         if result:
-            print("--- [get_graduation_info] 컨텍스트 생성 시작 ---") # <-- 추가
             requirements = result.get('requirements', {}) 
             credits = requirements.get('credits', {}) 
             courses = requirements.get('required_courses', {}) 
             english = requirements.get('english', {}) 
             grad_qual = requirements.get('graduation_qualification', {}) 
             notes_list = requirements.get('notes', []) 
-            
             notes_str = "\n".join([f"- {note}" for note in notes_list]) if notes_list else "없음"
 
             context = f"""
@@ -243,15 +245,11 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
             [졸업 자격] - {str(grad_qual)}
             [비고] {notes_str}
             """
-            print("--- [get_graduation_info] 컨텍스트 생성 완료 ---") # <-- 추가
             return context
         else:
-            print("--- [get_graduation_info] 최종 결과 없음 ---") # <-- 추가
             fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다. (적용 학번 범위를 확인해주세요)"
             return fail_msg
             
     except Exception as e:
-        print(f"!!!!!!!!!!!!!! MongoDB 졸업 요건 검색 중 치명적 오류 발생 !!!!!!!!!!!!!!") # <-- 수정
-        import traceback # <-- 추가
-        traceback.print_exc() # <-- 추가
-        return "졸업 요건 DB를 검색하는 중 심각한 오류가 발생했습니다."
+        print(f"MongoDB 졸업 요건 검색 오류: {e}")
+        return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."
