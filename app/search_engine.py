@@ -167,35 +167,46 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
         
         result = None 
         
-        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---") # <-- 추가
+        # app/search_engine.py -> get_graduation_info 함수 루프
+
+        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
         for i, req_doc in enumerate(all_reqs_for_abeek):
-            range_str = req_doc.get("applied_year_range", "") 
-            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'") # <-- 추가
-            
-            start_year, end_year = -1, float('inf') 
-            
+            range_str = req_doc.get("applied_year_range", "")
+            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
+
+            start_year, end_year = -1, float('inf')
+
             try:
-                range_parts = re.findall(r'\d+', range_str) 
-                
-                if len(range_parts) == 1: 
-                    start_year = int(range_parts[0])
-                    print(f"    -> 파싱: 시작 {start_year}, 끝 무한대") # <-- 추가
-                elif len(range_parts) == 2: 
-                    start_year = int(range_parts[0])
-                    end_year = int(range_parts[1])
-                    print(f"    -> 파싱: 시작 {start_year}, 끝 {end_year}") # <-- 추가
-                    
+                range_parts = re.findall(r'\d+', range_str)
+
+                temp_start = -1
+                temp_end = float('inf')
+
+                if len(range_parts) == 1:
+                    temp_start = int(range_parts[0])
+                elif len(range_parts) == 2:
+                    temp_start = int(range_parts[0])
+                    temp_end = int(range_parts[1])
+
+                # ▼▼▼ [디버그 로그 추가] ▼▼▼
+                print(f"    -> 파싱된 값: start={temp_start} (타입: {type(temp_start)}), end={temp_end} (타입: {type(temp_end)}), search={search_year} (타입: {type(search_year)})")
+                # ▲▲▲ [디버그 로그 추가] ▲▲▲
+
+                # 디버그 정보 출력 후 할당
+                start_year = temp_start
+                end_year = temp_end
+
                 # 핵심 매칭 조건
                 if start_year <= search_year <= end_year:
-                    result = req_doc 
-                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.") # <-- 추가
-                    break 
+                    result = req_doc
+                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
+                    break
                 else:
-                    print(f"    -> ❌ 매칭 실패. (검색: {search_year}, 범위: {start_year}~{end_year})") # <-- 추가
-                    
+                    print(f"    -> ❌ 매칭 실패.") # 단순화된 실패 로그
+
             except Exception as parse_error:
-                print(f"    -> ⚠️ 파싱 오류 발생: {parse_error}") # <-- 추가
-                continue 
+                print(f"    -> ⚠️ 파싱 오류 발생: {parse_error}")
+                continue
         
         print("--- [get_graduation_info] 학번 범위 매칭 완료 ---") # <-- 추가
 
