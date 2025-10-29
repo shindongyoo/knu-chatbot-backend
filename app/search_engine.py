@@ -169,6 +169,8 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
         
         # app/search_engine.py -> get_graduation_info 함수 루프
 
+        # app/search_engine.py -> get_graduation_info 함수 루프
+
         print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
         for i, req_doc in enumerate(all_reqs_for_abeek):
             range_str = req_doc.get("applied_year_range", "")
@@ -188,21 +190,25 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                     temp_start = int(range_parts[0])
                     temp_end = int(range_parts[1])
 
-                # ▼▼▼ [디버그 로그 추가] ▼▼▼
                 print(f"    -> 파싱된 값: start={temp_start} (타입: {type(temp_start)}), end={temp_end} (타입: {type(temp_end)}), search={search_year} (타입: {type(search_year)})")
-                # ▲▲▲ [디버그 로그 추가] ▲▲▲
 
-                # 디버그 정보 출력 후 할당
                 start_year = temp_start
                 end_year = temp_end
 
-                # 핵심 매칭 조건
-                if start_year <= search_year <= end_year:
+                # ▼▼▼ [핵심 수정: 비교 로직 분리 및 결과 직접 출력] ▼▼▼
+                is_start_ok = (start_year <= search_year)
+                is_end_ok = (search_year <= end_year)
+                is_match = is_start_ok and is_end_ok
+
+                print(f"    -> 비교 결과: ({start_year} <= {search_year}) = {is_start_ok}, ({search_year} <= {end_year}) = {is_end_ok}, 최종 매칭 = {is_match}")
+                # ▲▲▲ [핵심 수정 완료] ▲▲▲
+
+                if is_match: # 수정된 is_match 변수 사용
                     result = req_doc
                     print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
                     break
                 else:
-                    print(f"    -> ❌ 매칭 실패.") # 단순화된 실패 로그
+                    print(f"    -> ❌ 매칭 실패.")
 
             except Exception as parse_error:
                 print(f"    -> ⚠️ 파싱 오류 발생: {parse_error}")
