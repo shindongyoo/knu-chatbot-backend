@@ -16,18 +16,60 @@ embeddings = OpenAIEmbeddings(
     openai_api_key=os.getenv("OPENAI_API_KEY")
 )
 
+# app/search_engine.py 의 load_vector_db_manually 함수를 이걸로 교체
+
 def load_vector_db_manually(folder_path, index_name):
     faiss_path = os.path.join(folder_path, f"{index_name}.faiss")
-    pkl_path = os.path.join(folder_path, f"{index_name}.pkl")
+    pkl_path = os.path.join(folder_path, f"{index_name}.pkl") # 이제 이게 '좋은 주소록'
     if not os.path.exists(faiss_path) or not os.path.exists(pkl_path):
         raise FileNotFoundError(f"'{folder_path}'에서 DB 파일을 찾을 수 없습니다: {index_name}")
+    
     index = faiss.read_index(faiss_path)
     with open(pkl_path, "rb") as f:
-        docs_data = pickle.load(f)
-    documents = [Document(page_content=doc.pop('content', ''), metadata=doc) for doc in docs_data]
-    docstore = InMemoryDocstore({str(i): doc for i, doc in enumerate(documents)})
-    index_to_docstore_id = {i: str(i) for i in range(len(documents))}
-    return LangChainFAISS(embedding_function=embeddings, index=index, docstore=docstore, index_to_docstore_id=index_to_docstore_id)
+        # docs_data는 이제 [{'id':..., 'title':..., 'content':..., 'url':...}, ...] 형태의 리스트
+        docs_data = pickle.load(f) 
+        
+    documents = []
+    docstore_dict = {}
+    index_to_docstore_id = {}
+
+    # ▼▼▼ [핵심 수정: Document 생성 방식 변경] ▼▼▼
+    for i, doc_dict in enumerate(docs_data):
+        # DB 생성 시 사용된 'full_text'와 유사하게 page_content를 재구성
+        # (DB 생성 코드의 metadata 포맷을 참고하여 필드 추가/수정 필요)
+        metadata_str = (
+            f"📌 제목: {doc_dict.get('title', '').strip()}\n"
+            f"📅 작성일: {doc_dict.get('date', '').strip()}\n"
+            f"🏢 기업명: {doc_dict.get('company', 'N/A')}\n"
+        )
+        content_chunk = doc_dict.get('content', '').strip()
+        detail_url = doc_dict.get('url', '') # 'url' 키 사용 (DB 생성 코드 참고)
+
+        # DB 생성 코드의 full_text 포맷과 최대한 유사하게 만듦
+        reconstructed_page_content = f"{metadata_str}\n{content_chunk}\n\n🔗 자세한 내용은 링크를 참고하세요: {detail_url}"
+        
+        # 메타데이터에는 원본 딕셔너리 전체를 넣어도 되고, 필요한 것만 넣어도 됨
+        metadata = doc_dict.copy() # 원본 복사해서 사용
+
+        # LangChain Document 객체 생성 (page_content에 재구성된 텍스트 사용)
+        doc_obj = Document(page_content=reconstructed_page_content, metadata=metadata)
+        documents.append(doc_obj)
+        
+        # Docstore 및 매핑 생성 (기존 로직)
+        doc_id = str(i)
+        docstore_dict[doc_id] = doc_obj
+        index_to_docstore_id[i] = doc_id
+    # ▲▲▲ [수정 완료] ▲▲▲
+
+    docstore = InMemoryDocstore(docstore_dict)
+
+    # LangChainFAISS 객체 생성 (embedding_function 사용)
+    return LangChainFAISS(
+        embedding_function=embeddings, 
+        index=index, 
+        docstore=docstore, 
+        index_to_docstore_id=index_to_docstore_id
+    )
 
 # Vector DB 로딩
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
