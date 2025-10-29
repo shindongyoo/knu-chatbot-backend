@@ -138,32 +138,39 @@ def search_similar_documents(query: str, top_k: int = 3):
 
 
 
+# app/search_engine.py의 get_graduation_info 함수 전체를 이걸로 교체
+
 import re # re 모듈 import 확인 (없으면 추가)
 
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (상세 스키마 반영)
+    졸업 요건을 검색합니다. (상세 스키마 반영 + 상세 로깅 추가)
     """
+    print("--- [get_graduation_info] 함수 시작 ---") # <-- 추가
     try:
-        # 1. 컬렉션 이름 확인 (실제 이름으로 수정 필요시 수정)
         collection = chatbot_db["graduation_requirements"] 
-        
-        # --- [학번 범위 검색 로직] ---
+        print(f"--- [get_graduation_info] 컬렉션 '{collection.name}' 선택 완료 ---") # <-- 추가
+
         search_year = -1 
         try:
             search_year = int(student_id_prefix)
+            print(f"--- [get_graduation_info] 검색 학년: {search_year} ---") # <-- 추가
         except ValueError:
             print(f"[경고] 입력된 학번 '{student_id_prefix}'을(를) 숫자로 변환할 수 없습니다.")
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
 
         query = { "abeek": abeek_bool }
+        print(f"--- [get_graduation_info] MongoDB 쿼리 실행: {query} ---") # <-- 추가
         all_reqs_for_abeek = list(collection.find(query))
+        print(f"--- [get_graduation_info] 쿼리 결과: {len(all_reqs_for_abeek)}개 문서 찾음 ---") # <-- 추가
         
         result = None 
         
-        for req_doc in all_reqs_for_abeek:
+        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---") # <-- 추가
+        for i, req_doc in enumerate(all_reqs_for_abeek):
             range_str = req_doc.get("applied_year_range", "") 
+            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'") # <-- 추가
             
             start_year, end_year = -1, float('inf') 
             
@@ -172,65 +179,64 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 
                 if len(range_parts) == 1: 
                     start_year = int(range_parts[0])
+                    print(f"    -> 파싱: 시작 {start_year}, 끝 무한대") # <-- 추가
                 elif len(range_parts) == 2: 
                     start_year = int(range_parts[0])
                     end_year = int(range_parts[1])
+                    print(f"    -> 파싱: 시작 {start_year}, 끝 {end_year}") # <-- 추가
                     
+                # 핵심 매칭 조건
                 if start_year <= search_year <= end_year:
                     result = req_doc 
-                    print(f"[학번 매칭] 입력 '{search_year}' -> 범위 '{range_str}' ({start_year}~{end_year}) 문서 찾음")
+                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.") # <-- 추가
                     break 
+                else:
+                    print(f"    -> ❌ 매칭 실패. (검색: {search_year}, 범위: {start_year}~{end_year})") # <-- 추가
                     
             except Exception as parse_error:
-                print(f"[경고] 학번 범위 문자열 파싱 오류: '{range_str}' - {parse_error}")
+                print(f"    -> ⚠️ 파싱 오류 발생: {parse_error}") # <-- 추가
                 continue 
-        # --- [검색 로직 완료] ---
         
+        print("--- [get_graduation_info] 학번 범위 매칭 완료 ---") # <-- 추가
+
         if result:
-            # --- [핵심 수정: 상세 스키마 반영 Context 생성] ---
-            requirements = result.get('requirements', {}) # 메인 requirements 객체
-            credits = requirements.get('credits', {}) # 학점 객체
-            courses = requirements.get('required_courses', {}) # 필수 과목 객체
-            english = requirements.get('english', {}) # 영어 요건 객체 (구조 모름 - 일단 통째로)
-            grad_qual = requirements.get('graduation_qualification', {}) # 졸업 자격 객체 (구조 모름 - 일단 통째로)
-            notes_list = requirements.get('notes', []) # 비고 (리스트)
+            print("--- [get_graduation_info] 컨텍스트 생성 시작 ---") # <-- 추가
+            requirements = result.get('requirements', {}) 
+            credits = requirements.get('credits', {}) 
+            courses = requirements.get('required_courses', {}) 
+            english = requirements.get('english', {}) 
+            grad_qual = requirements.get('graduation_qualification', {}) 
+            notes_list = requirements.get('notes', []) 
             
-            # 비고 리스트를 하나의 문자열로 합침
             notes_str = "\n".join([f"- {note}" for note in notes_list]) if notes_list else "없음"
 
             context = f"""
             [검색된 맞춤형 졸업 요건 ({student_id_prefix}학번 기준)] 
             - 적용 학번(DB): {result.get('applied_year_range', 'N/A')} 기준
             - ABEEK 이수 여부: {'O' if result.get('abeek') else 'X'}
-
             [학점 요건]
             - 총 이수 학점: {credits.get('total', 'N/A')}학점
             - 전공 학점: {credits.get('major', 'N/A')}학점 
             - MSC 학점: {credits.get('msc', 'N/A')}학점
             - 기본소양 학점: {credits.get('basic_literacy', 'N/A')}학점
-
             [필수 과목 요건] 
             - 전공 기초: {courses.get('major_basic', 'N/A')}
             - 전공 필수: {courses.get('major_required', 'N/A')}
             - MSC 필수: {courses.get('msc_required', 'N/A')}
             - 기본소양 필수: {courses.get('basic_literacy_required', 'N/A')}
-
-            [영어 요건]
-            - {str(english)} (세부 구조 확인 필요)
-
-            [졸업 자격]
-            - {str(grad_qual)} (세부 구조 확인 필요)
-
-            [비고]
-            {notes_str}
+            [영어 요건] - {str(english)}
+            [졸업 자격] - {str(grad_qual)}
+            [비고] {notes_str}
             """
-            # --- [수정 완료] ---
+            print("--- [get_graduation_info] 컨텍스트 생성 완료 ---") # <-- 추가
             return context
         else:
-            # 검색 실패 메시지
+            print("--- [get_graduation_info] 최종 결과 없음 ---") # <-- 추가
             fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다. (적용 학번 범위를 확인해주세요)"
             return fail_msg
             
     except Exception as e:
-        print(f"MongoDB 졸업 요건 검색 오류: {e}")
-        return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."
+        print(f"!!!!!!!!!!!!!! MongoDB 졸업 요건 검색 중 치명적 오류 발생 !!!!!!!!!!!!!!") # <-- 수정
+        import traceback # <-- 추가
+        traceback.print_exc() # <-- 추가
+        return "졸업 요건 DB를 검색하는 중 심각한 오류가 발생했습니다."
