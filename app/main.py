@@ -175,6 +175,10 @@ async def stream_answer(req: QuestionRequest):
             if len(context) > MAX_CONTEXT_LENGTH:
                 context = context[:MAX_CONTEXT_LENGTH]
 
+            print("--- [AI 전달 직전] 최종 컨텍스트 내용: ---")
+            print(final_context[:500] + "...") # 너무 길 수 있으니 500자만 출력
+            print("---------------------------------------")
+
             system_prompt = """당신은 경북대학교 안내 챗봇입니다. 당신의 가장 중요한 임무는 '검색된 참고 자료'를 바탕으로 사용자의 질문에 **'정확하게'** 답변하는 것입니다.
 
             [답변 생성 3단계 규칙]
