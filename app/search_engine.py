@@ -11,59 +11,85 @@ from app.database import chatbot_db
 
 load_dotenv()
 
-# 임베딩 모델 설정 (DB 구축 스크립트와 동일하게 'text-embedding-3-small'로 설정)
 embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-small", 
+    model="text-embedding-3-small",  # <-- "ada-002"에서 변경!
     openai_api_key=os.getenv("OPENAI_API_KEY")
 )
 
+# app/search_engine.py 의 load_vector_db_manually 함수를 이걸로 교체
+
 def load_vector_db_manually(folder_path, index_name):
-    """지정된 경로에서 FAISS 인덱스와 메타데이터를 로드하고 문서 구조를 맞춥니다."""
     faiss_path = os.path.join(folder_path, f"{index_name}.faiss")
-    pkl_path = os.path.join(folder_path, f"{index_name}.pkl")
+    pkl_path = os.path.join(folder_path, f"{index_name}.pkl") # 이제 이게 '좋은 주소록'
     if not os.path.exists(faiss_path) or not os.path.exists(pkl_path):
         raise FileNotFoundError(f"'{folder_path}'에서 DB 파일을 찾을 수 없습니다: {index_name}")
     
     index = faiss.read_index(faiss_path)
     with open(pkl_path, "rb") as f:
-        docs_data = pickle.load(f)
+        # docs_data는 이제 [{'id':..., 'title':..., 'content':..., 'url':...}, ...] 형태의 리스트
+        docs_data = pickle.load(f) 
         
-    # ★★★ 수정 1: 메타데이터 구조에 맞게 문서 내용(page_content) 추출 방식을 수정합니다. ★★★
-    # 'content' 필드가 없으면 'table_content'를 사용하도록 합니다.
-    documents = [
-        Document(
-            page_content=doc.pop('content', doc.get('table_content', '')), 
-            metadata=doc
-        ) 
-        for doc in docs_data
-    ]
-    
-    docstore = InMemoryDocstore({str(i): doc for i, doc in enumerate(documents)})
-    index_to_docstore_id = {i: str(i) for i in range(len(documents))}
-    
-    return LangChainFAISS(embedding_function=embeddings, index=index, docstore=docstore, index_to_docstore_id=index_to_docstore_id)
+    documents = []
+    docstore_dict = {}
+    index_to_docstore_id = {}
+
+    # ▼▼▼ [핵심 수정: Document 생성 방식 변경] ▼▼▼
+    for i, doc_dict in enumerate(docs_data):
+        # DB 생성 시 사용된 'full_text'와 유사하게 page_content를 재구성
+        # (DB 생성 코드의 metadata 포맷을 참고하여 필드 추가/수정 필요)
+        metadata_str = (
+            f"📌 제목: {doc_dict.get('title', '').strip()}\n"
+            f"📅 작성일: {doc_dict.get('date', '').strip()}\n"
+            f"🏢 기업명: {doc_dict.get('company', 'N/A')}\n"
+        )
+        content_chunk = doc_dict.get('content', '').strip()
+        detail_url = doc_dict.get('url', '') # 'url' 키 사용 (DB 생성 코드 참고)
+
+        # DB 생성 코드의 full_text 포맷과 최대한 유사하게 만듦
+        reconstructed_page_content = f"{metadata_str}\n{content_chunk}\n\n🔗 자세한 내용은 링크를 참고하세요: {detail_url}"
+        
+        # 메타데이터에는 원본 딕셔너리 전체를 넣어도 되고, 필요한 것만 넣어도 됨
+        metadata = doc_dict.copy() # 원본 복사해서 사용
+
+        # LangChain Document 객체 생성 (page_content에 재구성된 텍스트 사용)
+        doc_obj = Document(page_content=reconstructed_page_content, metadata=metadata)
+        documents.append(doc_obj)
+        
+        # Docstore 및 매핑 생성 (기존 로직)
+        doc_id = str(i)
+        docstore_dict[doc_id] = doc_obj
+        index_to_docstore_id[i] = doc_id
+    # ▲▲▲ [수정 완료] ▲▲▲
+
+    docstore = InMemoryDocstore(docstore_dict)
+
+    # LangChainFAISS 객체 생성 (embedding_function 사용)
+    return LangChainFAISS(
+        embedding_function=embeddings, 
+        index=index, 
+        docstore=docstore, 
+        index_to_docstore_id=index_to_docstore_id
+    )
 
 # Vector DB 로딩
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# ★★★ 수정 2: notices_title_db 변수 선언 제거 (단일 DB 사용) ★★★
+notices_title_db = None
 notices_content_db = None
 jobs_db = None
 
-# ★★★ 수정 3: notices_title_db 로딩 블록 전체 제거 (단일 DB 사용) ★★★
-# try:
-#     NOTICES_DB_DIR = os.path.join(BASE_DIR, '..', 'vector_store', 'notices')
-#     notices_title_db = load_vector_db_manually(NOTICES_DB_DIR, "notices_title_index")
-#     print("✅ Notices (제목) Vector DB 로딩 성공.")
-# except Exception as e:
-#     print(f"❌ Notices (제목) Vector DB 로딩 실패: {e}")
+try:
+    NOTICES_DB_DIR = os.path.join(BASE_DIR, '..', 'vector_store', 'notices')
+    notices_title_db = load_vector_db_manually(NOTICES_DB_DIR, "notices_title_index")
+    print("✅ Notices (제목) Vector DB 로딩 성공.")
+except Exception as e:
+    print(f"❌ Notices (제목) Vector DB 로딩 실패: {e}")
 
 try:
     NOTICES_DB_DIR = os.path.join(BASE_DIR, '..', 'vector_store', 'notices')
-    # 공지사항 DB 파일명을 임베딩 스크립트와 동일하게 지정합니다.
     notices_content_db = load_vector_db_manually(NOTICES_DB_DIR, "notices_content_index")
-    print("✅ Notices Vector DB 로딩 성공 (notices_content_index).")
+    print("✅ Notices (본문) Vector DB 로딩 성공.")
 except Exception as e:
-    print(f"❌ Notices Vector DB 로딩 실패: {e}")
+    print(f"❌ Notices (본문) Vector DB 로딩 실패: {e}")
 
 try:
     JOBS_DB_DIR = os.path.join(BASE_DIR, '..', 'vector_store', 'jobs')
@@ -73,7 +99,7 @@ except Exception as e:
     print(f"❌ Jobs Vector DB 로딩 실패: {e}")
 
 
-# --- 2. MongoDB에서 구성원 정보 검색 함수 (변경 없음) ---
+# --- 2. MongoDB에서 구성원 정보 검색 함수 ---
 
 def search_members_in_mongodb(query: str):
     match = re.search(r'([\w가-힣]{2,4})\s*(교수님|교수|조교|선생님)', query)
@@ -96,17 +122,20 @@ def search_members_in_mongodb(query: str):
 
 # --- 3. 메인 검색 함수 (라우터 로직 통합) ---
 
-def search_similar_documents(query: str, top_k: int = 1):
+def search_similar_documents(query: str, top_k: int = 2):
     print(f"--- [진단 1/5] '{query}'에 대한 문서 검색 시작 (top_k={top_k}) ---")
     member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님", "사무실", "위치", "호관", "호실"]
     job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
 
     if any(keyword in query for keyword in member_keywords):
         print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 구성원 검색 시도")
+        # 2. MongoDB 검색 함수를 "호출"합니다.
         mongo_context = search_members_in_mongodb(query)
         
+        # 3. MongoDB에서 결과를 찾았다면,
         if mongo_context:
             print(f"--- [진단 5/5] MongoDB에서 컨텍스트 생성 완료. ---")
+            # 4. 즉시 결과를 "반환"하고 함수를 종료합니다. (Vector DB로 넘어가지 않음)
             return mongo_context, ['name', 'position', 'lab', 'email', 'phone']
         
     selected_dbs = None
@@ -114,10 +143,9 @@ def search_similar_documents(query: str, top_k: int = 1):
         print("[진단] 취업 DB를 선택합니다.")
         selected_dbs = (jobs_db,)
     else:
-        print("[진단] 공지사항 DB를 선택합니다.")
-        # ★★★ 수정 4: notices_content_db 하나만 사용합니다. ★★★
-        selected_dbs = (notices_content_db,)
-        
+        print("[진단] 공지사항 DB (제목+본문)를 선택합니다.")
+        selected_dbs = (notices_title_db, notices_content_db)
+    
     if not any(db for db in selected_dbs if db is not None):
         return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패).", []
 
@@ -125,8 +153,7 @@ def search_similar_documents(query: str, top_k: int = 1):
     for db in selected_dbs:
         if db:
             print(f"--- [진단 2/5] DB 객체에서 유사도 검색 실행 ---")
-            # top_k는 main.py에서 전달되는 값입니다.
-            results = db.similarity_search_with_score(query, k=top_k) 
+            results = db.similarity_search_with_score(query, k=top_k)
             print(f"--- [진단 3/5] 검색 완료. {len(results)}개의 결과를 찾았습니다. ---")
             all_results.extend(results)
 
@@ -143,9 +170,6 @@ def search_similar_documents(query: str, top_k: int = 1):
     for doc, score in sorted_results[:top_k]:
         context += f"- 내용: {doc.page_content}\n"
         field_names.update(doc.metadata.keys())
-        # 디버깅용 로그 출력 (이전 답변에서 추가했던 내용)
-        print(f"  [🔍 Score] 점수: {score:.4f}, 내용 프리뷰: {doc.page_content[:50]}...")
-
 
     if not context:
         print("!!!!!!!!!!!!!! [진단 결과] 최종 컨텍스트가 비어있습니다. 검색 결과 없음 !!!!!!!!!!!!!!")
@@ -153,6 +177,12 @@ def search_similar_documents(query: str, top_k: int = 1):
         print(f"--- [진단 5/5] 최종 컨텍스트 생성 완료. ---")
 
     return context, list(field_names)
+
+
+
+# app/search_engine.py의 get_graduation_info 함수 전체를 이걸로 교체
+
+import re # re 모듈 import 확인 (없으면 추가)
 
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
