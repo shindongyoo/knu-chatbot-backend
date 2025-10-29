@@ -173,6 +173,8 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
 
         # app/search_engine.py -> get_graduation_info 함수 루프
 
+        # app/search_engine.py -> get_graduation_info 함수 루프
+
         print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
         for i, req_doc in enumerate(all_reqs_for_abeek):
             range_str = req_doc.get("applied_year_range", "")
@@ -197,22 +199,16 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 start_year = temp_start
                 end_year = temp_end
 
-                # ▼▼▼ [핵심 수정: 뺄셈 방식으로 비교 로직 변경] ▼▼▼
-                # is_start_ok = (start_year <= search_year)  # 기존 방식 주석 처리
-                # is_end_ok = (search_year <= end_year)    # 기존 방식 주석 처리
-                
-                # 새로운 방식: (검색년도 - 시작년도)가 0 이상인가?
-                is_start_ok = (search_year - start_year >= 0) if start_year != -1 else False 
-                # 새로운 방식: (종료년도 - 검색년도)가 0 이상인가? (무한대 처리 포함)
-                is_end_ok = (end_year - search_year >= 0) if end_year != float('inf') else True 
-
+                # ▼▼▼ [핵심 수정: 원래의 올바른 비교 로직으로 복귀] ▼▼▼
+                is_start_ok = (start_year <= search_year)
+                is_end_ok = (search_year <= end_year)
                 is_match = is_start_ok and is_end_ok
 
-                # 비교 결과 로그는 그대로 유지 (새 방식의 결과 확인)
-                print(f"    -> 비교 결과: (start >= 0) = {is_start_ok}, (end >= 0) = {is_end_ok}, 최종 매칭 = {is_match}")
+                # 올바른 비교 결과를 출력하도록 레이블 수정
+                print(f"    -> 비교 결과: ({start_year} <= {search_year}) = {is_start_ok}, ({search_year} <= {end_year}) = {is_end_ok}, 최종 매칭 = {is_match}")
                 # ▲▲▲ [핵심 수정 완료] ▲▲▲
 
-                if is_match: 
+                if is_match:
                     result = req_doc
                     print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
                     break
