@@ -122,59 +122,72 @@ def search_members_in_mongodb(query: str):
 
 # --- 3. 메인 검색 함수 (라우터 로직 통합) ---
 
-def search_similar_documents(query: str, top_k: int = 2):
-    print(f"--- [진단 1/5] '{query}'에 대한 문서 검색 시작 (top_k={top_k}) ---")
+def search_similar_documents(query: str, top_k: int = 3): # top_k=3으로 재설정 (진단용)
+    print(f"\n--- [심층 진단] '{query}' 검색 시작 (상위 {top_k}개 요청) ---")
     member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님", "사무실", "위치", "호관", "호실"]
     job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
 
+    # --- 교수님 질문 처리 (MongoDB) ---
     if any(keyword in query for keyword in member_keywords):
-        print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 구성원 검색 시도")
-        # 2. MongoDB 검색 함수를 "호출"합니다.
+        print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 검색 시도")
         mongo_context = search_members_in_mongodb(query)
-        
-        # 3. MongoDB에서 결과를 찾았다면,
         if mongo_context:
-            print(f"--- [진단 5/5] MongoDB에서 컨텍스트 생성 완료. ---")
-            # 4. 즉시 결과를 "반환"하고 함수를 종료합니다. (Vector DB로 넘어가지 않음)
+            print(f"--- [심층 진단] MongoDB 결과 반환 ---")
             return mongo_context, ['name', 'position', 'lab', 'email', 'phone']
-        
+        else:
+             print(f"[🔍 DB 라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
+    
+    # --- Vector DB 검색 ---
     selected_dbs = None
+    db_type = ""
     if any(keyword in query for keyword in job_keywords):
-        print("[진단] 취업 DB를 선택합니다.")
+        print("[진단] 취업 DB 선택")
         selected_dbs = (jobs_db,)
+        db_type = "Jobs"
     else:
-        print("[진단] 공지사항 DB (제목+본문)를 선택합니다.")
+        print("[진단] 공지사항 DB (제목+본문) 선택")
         selected_dbs = (notices_title_db, notices_content_db)
+        db_type = "Notices(Title+Content)"
     
     if not any(db for db in selected_dbs if db is not None):
         return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패).", []
 
-    all_results = []
-    for db in selected_dbs:
+    all_results_with_scores = []
+    print(f"--- [심층 진단] {db_type} DB에서 유사도 검색 실행 ---")
+    for i, db in enumerate(selected_dbs):
         if db:
-            print(f"--- [진단 2/5] DB 객체에서 유사도 검색 실행 ---")
-            results = db.similarity_search_with_score(query, k=top_k)
-            print(f"--- [진단 3/5] 검색 완료. {len(results)}개의 결과를 찾았습니다. ---")
-            all_results.extend(results)
+            # similarity_search_with_score는 (Document, score) 튜플 리스트 반환
+            results = db.similarity_search_with_score(query, k=top_k) 
+            print(f"  [DB {i+1}] 검색 완료: {len(results)}개 결과 찾음")
+            for doc, score in results:
+                print(f"    - 점수: {score:.4f}, 내용: {doc.page_content[:100]}...") # 점수와 내용 일부 출력
+            all_results_with_scores.extend(results)
 
+    # --- 중복 제거 및 최종 선택 ---
     unique_results = {}
-    for doc, score in all_results:
+    for doc, score in all_results_with_scores:
+        # 내용이 같으면 점수(거리)가 더 낮은 (더 유사한) 것으로 갱신
         if doc.page_content not in unique_results or score < unique_results[doc.page_content][1]:
             unique_results[doc.page_content] = (doc, score)
 
+    # 점수(score) 기준으로 오름차순 정렬 (점수가 낮을수록 유사함)
     sorted_results = sorted(unique_results.values(), key=lambda item: item[1])
-    print(f"--- [진단 4/5] 중복 제거 후 {len(sorted_results)}개의 결과를 얻었습니다. ---")
+    print(f"--- [심층 진단] 중복 제거 및 정렬 후 {len(sorted_results)}개 결과:")
+    for i, (doc, score) in enumerate(sorted_results):
+         print(f"  [최종 순위 {i+1}] 점수: {score:.4f}, 내용: {doc.page_content[:100]}...")
 
+    # 최종 Context 생성 (상위 top_k개 사용)
     context = ""
     field_names = set()
+    print(f"--- [심층 진단] 상위 {top_k}개를 최종 Context로 사용 ---")
     for doc, score in sorted_results[:top_k]:
-        context += f"- 내용: {doc.page_content}\n"
+        context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n" # 점수 포함
         field_names.update(doc.metadata.keys())
 
     if not context:
-        print("!!!!!!!!!!!!!! [진단 결과] 최종 컨텍스트가 비어있습니다. 검색 결과 없음 !!!!!!!!!!!!!!")
+        print("!!!!!!!!!!!!!! [심층 진단] 최종 컨텍스트가 비어있음 !!!!!!!!!!!!!!")
     else:
-        print(f"--- [진단 5/5] 최종 컨텍스트 생성 완료. ---")
+        print(f"--- [심층 진단] 최종 컨텍스트 생성 완료 ---")
 
     return context, list(field_names)
 
