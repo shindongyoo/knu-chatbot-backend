@@ -167,13 +167,6 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
         
         result = None 
         
-        # app/search_engine.py -> get_graduation_info 함수 루프
-
-        # app/search_engine.py -> get_graduation_info 함수 루프
-
-        # app/search_engine.py -> get_graduation_info 함수 루프
-
-        # app/search_engine.py -> get_graduation_info 함수 루프
 
         print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
         for i, req_doc in enumerate(all_reqs_for_abeek):
@@ -199,9 +192,9 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 start_year = temp_start
                 end_year = temp_end
 
-                # ▼▼▼ [핵심 수정: 원래의 올바른 비교 로직으로 복귀] ▼▼▼
-                is_start_ok = (start_year <= search_year)
-                is_end_ok = (search_year <= end_year)
+                # ▼▼▼ [핵심 수정: 원래의 올바른 비교 로직으로 복귀 + 로그 레이블 수정] ▼▼▼
+                is_start_ok = (start_year <= search_year) # 올바른 비교
+                is_end_ok = (search_year <= end_year)   # 올바른 비교
                 is_match = is_start_ok and is_end_ok
 
                 # 올바른 비교 결과를 출력하도록 레이블 수정
