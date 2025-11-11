@@ -174,24 +174,33 @@ def stream_answer(req: QuestionRequest):
             else:
                 print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
                 
-                # ▼▼▼ [수정 1] API가 이해하는 'list[dict]' 형태로 대화 기록을 불러옵니다.
-                history_messages = get_recent_history(session_id, n=5) # n=5는 최근 5회 Q/A. 조절 가능
+                # 1. [통합] API가 이해하는 'list[dict]' 형태로 대화 기록을 "한 번만" 불러옵니다.
+                history_messages = get_recent_history(session_id, n=5)
                 
-                # ▼▼▼ [수정 1: 'transform_query' 호출 로직 추가] ▼▼▼
-                # AI를 호출해 질문을 검색어로 변환
-                search_queries = transform_query(question)
+                # 1. search_engine에서 교수님 키워드 리스트를 가져옵니다. (가져올 수 없다면 직접 정의)
+                member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
                 
-                # 변환된 모든 검색어로 DB에서 자료를 찾음
-                all_contexts = []
-                for q in search_queries:
-                    context_part, _ = search_similar_documents(q) # top_k=3이라면 총 3*3=9개 검색
-                    if context_part:
-                        all_contexts.append(context_part)
+                context = None
                 
-                # 모든 검색 결과를 하나로 합침
-                context = "\n---\n".join(all_contexts)
-                # ▲▲▲ [수정 완료] ▲▲▲
+                if any(keyword in question for keyword in member_keywords):
+                    # 1-A. 교수님 질문이면, search_similar_documents를 "딱 한 번만" 호출합니다.
+                    print("[라우팅] 교수님 질문으로 판단. MongoDB 검색 시도.")
+                    context, _ = search_similar_documents(question)
                 
+                else:
+                    # 1-B. 교수님 질문이 "아닌" 경우에만 "질문 해석 AI"를 사용합니다.
+                    print("[라우팅] 일반 질문으로 판단. AI 쿼리 변환 시작.")
+                    search_queries = transform_query(question)
+                    
+                    all_contexts = []
+                    for q in search_queries:
+                        context_part, _ = search_similar_documents(q)
+                        if context_part:
+                            all_contexts.append(context_part)
+                    
+                    context = "\n---\n".join(all_contexts)
+                    
+              
                 MAX_CONTEXT_LENGTH = 7000
                 if len(context) > MAX_CONTEXT_LENGTH:
                     context = context[:MAX_CONTEXT_LENGTH]
@@ -203,10 +212,9 @@ def stream_answer(req: QuestionRequest):
                 당신은 '검색된 참고 자료'와 '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
 
                 [행동 지침]
-                1.  **[1단계: 자료 평가]** 먼저 '검색된 참고 자료'가 사용자의 질문과 관련성이 높은지 스스로 평가합니다.
-                
-                2.  **[2단계: 답변 생성]**
-                    * **(A) 자료가 유용할 때:** "장학생", "수강신청", "교수님" 등 **교내 정보**에 대해 '검색된 참고 자료'가 **정확하고 유용**하다고 판단되면, **해당 자료에 근거**하여 답변하세요.
+                1. 먼저 '검색된 참고 자료'가 사용자의 질문과 관련성이 높은지 스스로 평가합니다.
+            
+                2.     * **(A) 자료가 유용할 때:** "장학생", "수강신청", "교수님" 등 **교내 정보**에 대해 '검색된 참고 자료'가 **정확하고 유용**하다고 판단되면, **해당 자료에 근거**하여 답변하세요.
                     * **(B) 자료가 쓸모없을 때:** '검색된 참고 자료'가 질문과 관련 없거나(예: '장학생' 질문에 '선거일' 자료) 품질이 낮다고 판단되면, **자료를 무시**하세요.
                     * **(C) 잡담 또는 자료가 없을 때:** 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, 위 (B)처럼 자료를 무시하기로 결정했다면, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요.
 
