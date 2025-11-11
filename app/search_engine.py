@@ -233,7 +233,9 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                     range_start_year = int(year_numbers[0])
                     range_end_year = int(year_numbers[1])
                 
-                is_match = (range_start_year <= search_year) and (search_year <= range_end_year)
+                is_after_start = (range_start_year <= search_year)
+                is_before_end = (search_year <= range_end_year)
+                is_match = is_after_start and is_before_end
                 
                 if is_match:
                     result = req_doc
