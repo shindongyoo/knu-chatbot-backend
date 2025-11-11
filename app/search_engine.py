@@ -197,10 +197,13 @@ def search_similar_documents(query: str, top_k: int = 3): # top_k=3으로 재설
 # app/search_engine.py의 get_graduation_info 함수 전체를 이걸로 교체
 
 
+import re 
+import traceback # <-- 상세 오류 추적을 위해 import 추가
+
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (상세 스키마 반영 + 상세 로깅 추가)
+    졸업 요건을 검색합니다. (루프 내 오류 로깅 추가)
     """
     print("--- [get_graduation_info] 함수 시작 ---")
     try:
@@ -215,25 +218,28 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 search_year = 2000 + year_prefix_num 
             else:
                 search_year = year_prefix_num
+            print(f"[학번 변환] 입력 '{student_id_prefix}' -> 검색 연도 '{search_year}'")
         except ValueError:
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
         
-        # --- [2. 학번 범위 검색 로직] ---
+        # --- [2. MongoDB 쿼리] ---
         query = { "abeek": abeek_bool }
-        
-        # ▼▼▼ [핵심 수정] 쿼리 실행 직전/직후 로그 추가 ▼▼▼
         print(f"--- [MongoDB] 쿼리 실행 직전: {query} ---")
         all_reqs_for_abeek = list(collection.find(query))
         print(f"--- [MongoDB] 쿼리 실행 완료: {len(all_reqs_for_abeek)}개 찾음 ---")
-        # ▲▲▲ [수정 완료] ▲▲▲
         
         result = None 
         
+        # --- [3. 학번 범위 매칭 루프] ---
         print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
         for i, req_doc in enumerate(all_reqs_for_abeek):
             range_str = req_doc.get("applied_year_range", "") 
             print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
-            start_year, end_year = -1, float('inf') 
+            
+            range_start_year = -1
+            range_end_year = float('inf') 
+            
+            # ▼▼▼ [핵심 수정] ▼▼▼
             try:
                 year_numbers = re.findall(r'\d+', range_str)
                 if len(year_numbers) == 1: 
@@ -246,19 +252,21 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 is_before_end = (search_year <= range_end_year)
                 is_match = is_after_start and is_before_end
                 
+                print(f"    -> 파싱: {range_start_year}~{range_end_year} / 비교: ({is_after_start} AND {is_before_end}) = {is_match}") # 로그 추가
+
                 if is_match:
                     result = req_doc
+                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
                     break 
-            
-            except Exception as e: # <--- 'as e' 추가
-                print(f"!!!!!!!!!!!!!! 범위 매칭 중 오류 발생 !!!!!!!!!!!!!!")
-                print(f"    -> 입력 학번: {search_year}, 범위 문자열: '{range_str}'")
+                else:
+                    print(f"    -> ❌ 매칭 실패.")
+
+            except Exception as e: 
+                print(f"!!!!!!!!!!!!!! [루프 {i+1}] 범위 매칭 중 오류 발생 !!!!!!!!!!!!!!")
                 print(f"    -> 오류 내용: {e}")
-                # (traceback도 추가하면 더 좋습니다)
-                import traceback
-                traceback.print_exc()
+                traceback.print_exc() # 상세 오류 스택 출력
                 continue # 다음 루프로 넘어감
-        
+            
         # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
             # ▼▼▼ [핵심 수정: 상세 스키마 반영] ▼▼▼
@@ -330,7 +338,7 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
             # ▲▲▲ [수정 완료] ▲▲▲
             return context
         else:
-            fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다. (적용 학번 범위를 확인해주세요)"
+            fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다."
             return fail_msg
             
     except Exception as e:
