@@ -180,7 +180,20 @@ def stream_answer(req: QuestionRequest):
                 # ▼▼▼ [수정 1] API가 이해하는 'list[dict]' 형태로 대화 기록을 불러옵니다.
                 history_messages = get_recent_history(session_id, n=5) # n=5는 최근 5회 Q/A. 조절 가능
                 
-                context, _ = search_similar_documents(question)
+                # ▼▼▼ [수정 1: 'transform_query' 호출 로직 추가] ▼▼▼
+                # AI를 호출해 질문을 검색어로 변환
+                search_queries = transform_query(question)
+                
+                # 변환된 모든 검색어로 DB에서 자료를 찾음
+                all_contexts = []
+                for q in search_queries:
+                    context_part, _ = search_similar_documents(q) # top_k=3이라면 총 3*3=9개 검색
+                    if context_part:
+                        all_contexts.append(context_part)
+                
+                # 모든 검색 결과를 하나로 합침
+                context = "\n---\n".join(all_contexts)
+                # ▲▲▲ [수정 완료] ▲▲▲
                 
                 MAX_CONTEXT_LENGTH = 7000
                 if len(context) > MAX_CONTEXT_LENGTH:
@@ -218,26 +231,19 @@ def stream_answer(req: QuestionRequest):
                 ### 답변:
                 """
                 
-                # ▼▼▼ [수정 4] API에 전달할 'messages' 리스트를 재구성합니다.
+                # API에 전달할 'messages' 리스트 재구성
                 messages_to_send = []
                 messages_to_send.append({"role": "system", "content": system_prompt})
-                
-                # [중요] 이전 대화 기록(list[dict])을 먼저 추가합니다.
-                messages_to_send.extend(history_messages) 
-                
-                # [중요] RAG 컨텍스트가 포함된 'user_prompt'를 마지막에 추가합니다.
-                messages_to_send.append({"role": "user", "content": user_prompt})
+                messages_to_send.extend(history_messages) # 이전 대화 기록 추가
+                messages_to_send.append({"role": "user", "content": user_prompt}) # RAG + 새 질문 추가
 
-                # [디버깅용] API에 전달되는 최종 메시지 목록 확인
+                # (디버깅 로그는 유용하므로 유지)
                 print("--- [API Request] API로 다음 메시지들을 전송합니다: ---")
-                for msg in messages_to_send:
-                    content_preview = (msg['content'][:150] + '...') if len(msg['content']) > 150 else msg['content']
-                    print(f"  {msg['role']}: {content_preview.replace('  ', ' ')}")
-                print("--------------------------------------------------")
-
+                # ... (로그 출력 코드) ...
+                
                 stream = client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=messages_to_send, # <-- (변경) 재구성된 리스트를 전달
+                    messages=messages_to_send, # <-- 재구성된 리스트 전달
                     stream=True,
                     temperature=0.7 
                 )
