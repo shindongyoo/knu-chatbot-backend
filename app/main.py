@@ -298,7 +298,7 @@ async def ask(req: QuestionRequest):
         {context}
 
         ### 이전 대화 기록:
-        {recent}
+        {history_messages}
 
         ### 사용자의 질문:
         {req.question}
