@@ -196,17 +196,18 @@ def search_similar_documents(query: str, top_k: int = 3): # top_k=3으로 재설
 
 # app/search_engine.py의 get_graduation_info 함수 전체를 이걸로 교체
 
-import re # re 모듈 import 확인 (없으면 추가)
 
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (최종 상세 스키마 반영)
+    졸업 요건을 검색합니다. (상세 스키마 반영 + 상세 로깅 추가)
     """
+    print("--- [get_graduation_info] 함수 시작 ---")
     try:
         collection = chatbot_db["graduation_requirements"] 
+        print(f"--- [get_graduation_info] 컬렉션 '{collection.name}' 선택 완료 ---")
         
-        # --- [1. 학번 변환 로직 (이전과 동일)] ---
+        # --- [1. 학번 변환 로직] ---
         search_year = -1 
         try:
             year_prefix_num = int(student_id_prefix)
@@ -217,13 +218,21 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
         except ValueError:
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
         
-        # --- [2. 학번 범위 검색 로직 (이전과 동일)] ---
+        # --- [2. 학번 범위 검색 로직] ---
         query = { "abeek": abeek_bool }
+        
+        # ▼▼▼ [핵심 수정] 쿼리 실행 직전/직후 로그 추가 ▼▼▼
+        print(f"--- [MongoDB] 쿼리 실행 직전: {query} ---")
         all_reqs_for_abeek = list(collection.find(query))
+        print(f"--- [MongoDB] 쿼리 실행 완료: {len(all_reqs_for_abeek)}개 찾음 ---")
+        # ▲▲▲ [수정 완료] ▲▲▲
+        
         result = None 
         
-        for req_doc in all_reqs_for_abeek:
+        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
+        for i, req_doc in enumerate(all_reqs_for_abeek):
             range_str = req_doc.get("applied_year_range", "") 
+            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
             start_year, end_year = -1, float('inf') 
             try:
                 year_numbers = re.findall(r'\d+', range_str)

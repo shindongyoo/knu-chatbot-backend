@@ -2,28 +2,25 @@
 import os
 import json
 import time
+import openai
+import pytesseract
 from datetime import datetime
 from fastapi import FastAPI, Request, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-import openai
 from PyPDF2 import PdfReader
 from PIL import Image
-import pytesseract
-
 from dotenv import load_dotenv
 load_dotenv() # .env 파일을 여기서 먼저 로드합니다.
-
 # --- 서비스 초기화 ---
 # OpenAI 클라이언트 초기화 (최신 v1.x 방식)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 # ▼▼▼ [수정] database.py에서 DB 객체들을 import 합니다. ▼▼▼
 from app.database import chatbot_db, r
-
 # ▼▼▼ [수정] DB 초기화가 끝난 후에 search_engine을 import 합니다. ▼▼▼
 from app.search_engine import search_similar_documents
+from app.search_engine import get_graduation_info
 
 # FastAPI 앱 설정
 app = FastAPI()
@@ -114,7 +111,7 @@ def stream_answer(req: QuestionRequest):
     session_id = req.session_id
     user_id = req.user_id
 
-    from app.search_engine import get_graduation_info
+    
 
     def event_generator():
         try:
