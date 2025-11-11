@@ -201,37 +201,30 @@ import re # re 모듈 import 확인 (없으면 추가)
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (상세 중첩 스키마 완벽 반영)
+    졸업 요건을 검색합니다. (최종 상세 스키마 반영)
     """
     try:
-        # 1. 컬렉션 이름 확인 (실제 이름으로 수정 필요시 수정)
         collection = chatbot_db["graduation_requirements"] 
         
-        # --- [학번 변환 로직 (이전과 동일)] ---
+        # --- [1. 학번 변환 로직 (이전과 동일)] ---
         search_year = -1 
         try:
             year_prefix_num = int(student_id_prefix)
             if 0 <= year_prefix_num <= 99: 
                 search_year = 2000 + year_prefix_num 
-                print(f"[학번 변환] 입력 '{student_id_prefix}' -> 검색 연도 '{search_year}'")
             else:
                 search_year = year_prefix_num
-                print(f"[학번 변환] 입력 '{student_id_prefix}'은(는) 4자리 이상이므로 그대로 '{search_year}' 사용")
         except ValueError:
-            print(f"[경고] 입력된 학번 '{student_id_prefix}'을(를) 숫자로 변환할 수 없습니다.")
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
         
-        # --- [학번 범위 검색 로직 (이전과 동일)] ---
+        # --- [2. 학번 범위 검색 로직 (이전과 동일)] ---
         query = { "abeek": abeek_bool }
         all_reqs_for_abeek = list(collection.find(query))
         result = None 
         
-        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
-        for i, req_doc in enumerate(all_reqs_for_abeek):
-            range_str = req_doc.get("applied_year_range", "")
-            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
-            range_start_year = -1
-            range_end_year = float('inf') 
+        for req_doc in all_reqs_for_abeek:
+            range_str = req_doc.get("applied_year_range", "") 
+            start_year, end_year = -1, float('inf') 
             try:
                 year_numbers = re.findall(r'\d+', range_str)
                 if len(year_numbers) == 1: 
@@ -240,89 +233,90 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                     range_start_year = int(year_numbers[0])
                     range_end_year = int(year_numbers[1])
                 
-                print(f"    -> 파싱된 범위: Start={range_start_year}, End={range_end_year}, 검색 연도={search_year}")
-                is_after_start = (range_start_year <= search_year)
-                is_before_end = (search_year <= range_end_year)
-                is_match = is_after_start and is_before_end
-                print(f"    -> 비교 결과: ({range_start_year} <= {search_year}) = {is_after_start}, ({search_year} <= {range_end_year}) = {is_before_end}, 최종 매칭 = {is_match}")
+                is_match = (range_start_year <= search_year) and (search_year <= range_end_year)
+                
                 if is_match:
                     result = req_doc
-                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
                     break 
-                else:
-                    print(f"    -> ❌ 매칭 실패.")
-            except Exception as parse_error:
-                print(f"    -> ⚠️ 파싱 오류 발생: {parse_error}")
+            except Exception:
                 continue 
         
-        # --- [Context 생성 및 반환 (상세 스키마 반영)] ---
+        # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
             # ▼▼▼ [핵심 수정: 상세 스키마 반영] ▼▼▼
             
             # 안전하게 데이터 추출 (객체가 없으면 빈 dict 반환)
             requirements = result.get('requirements', {}) 
             credits = requirements.get('credits', {})
-            # 'credits' 객체 안의 하위 객체들 추출
             credit_basic = credits.get('기본소양', {}) 
-            credit_msc = credits.get('전공기반', {}) 
+            credit_msc = credits.get('전공기반', "N/A") # 전공기반은 객체가 아닌 직접 값
             credit_major = credits.get('공학전공', {})
             
             courses = requirements.get('required_courses', {}) 
+            courses_basic = courses.get('기본소양', [])
+            courses_msc = courses.get('전공기반', [])
+            courses_major = courses.get('공학전공', [])
+
             english = requirements.get('english', {})
+            eng_tests = english.get('tests', [])
+            eng_sub = english.get('substitution', [])
+            eng_notes = english.get('notes', [])
+
             grad_qual = requirements.get('graduation_qualification', {})
             advisor = grad_qual.get('advisor_consultation', {})
             software = grad_qual.get('software_credits', {})
+            sw_courses = software.get('required_courses', [])
+            sw_sub = software.get('substitution', [])
+            grad_qual_notes = grad_qual.get('notes', [])
+
+            # 리스트(Array) 정보를 콤마(,)로 구분된 문자열로 변환
+            def format_list(items):
+                return ", ".join(items) if items else "해당 없음"
             
-            # 리스트(Array) 정보 추출 및 포맷팅
-            notes_str = "\n".join([f"- {note}" for note in requirements.get('notes', [])]) or "없음"
-            english_notes_str = "\n".join([f"- {note}" for note in english.get('notes', [])]) or "없음"
-            english_sub_str = "\n".join([f"- {sub}" for sub in english.get('substitution', [])]) or "없음"
-            grad_qual_notes_str = "\n".join([f"- {note}" for note in grad_qual.get('notes', [])]) or "없음"
-            software_sub_str = "\n".join([f"- {sub}" for sub in software.get('substitution', [])]) or "없음"
+            # 영어 시험 요건 포맷팅
+            def format_eng_tests(tests):
+                if not tests: return "해당 없음"
+                return ", ".join([f"{test.get('name')}: {test.get('score')}점 이상" for test in tests])
 
             context = f"""
-            [검색된 맞춤형 졸업 요건 ({student_id_prefix}학번 기준)] 
+            [검색된 맞춤형 졸업 요건 ({student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'})] 
             - 적용 학번(DB): {result.get('applied_year_range', 'N/A')} 기준
-            - ABEEK 이수 여부: {'O' if result.get('abeek') else 'X'}
 
-            [학점 요건 (Credits)]
+            [1. 학점 요건 (Credits)]
             - 총 이수 학점: {credits.get('total', 'N/A')}학점
-            - 기본소양(교양): {credit_basic.get('total', 'N/A')}학점
-            - 전공기반(MSC): {credit_msc.get('total', 'N/A')}학점
-            - 공학전공(전공): {credit_major.get('total', 'N/A')}학점
-            - (공학전공 참고: {credit_major.get('note', '')})
+            - 기본소양(교양): {credit_basic.get('min', 'N/A')}학점 이상
+            - 전공기반(MSC): {credit_msc}학점
+            - 공학전공(전공): {credit_major.get('total', 'N/A')}학점 (이 중 설계 {credit_major.get('design', 'N/A')}학점 포함)
+            - 전공 참고: {credit_major.get('note', 'N/A')}
 
-            [필수 과목 요건 (Required Courses)] 
-            - 기본소양 필수: {courses.get('기본소양', 'N/A')}
-            - 전공기반 필수: {courses.get('전공기반', 'N/A')}
-            - 공학전공 필수: {courses.get('공학전공', 'N/A')}
+            [2. 필수 과목 요건 (Required Courses)] 
+            - 기본소양 필수: {format_list(courses_basic)}
+            - 전공기반 필수: {format_list(courses_msc)}
+            - 공학전공 필수: {format_list(courses_major)}
 
-            [영어 요건 (English)]
-            - (영어 요건은 복잡하므로 상세 정보 확인 필요)
-            - 영어 요건 면제 기준:
-            {english_sub_str}
-            - 영어 요건 비고:
-            {english_notes_str}
+            [3. 영어 요건 (English)]
+            - 공인 시험 기준: {format_eng_tests(eng_tests)}
+            - 면제 기준: {format_list(eng_sub)}
+            - 비고: {format_list(eng_notes)}
 
-            [졸업 자격 (Graduation Qualification)]
-            - 지도교수 상담: {advisor.get('count', 'N/A')}회 ({advisor.get('note', 'N/A')})
-            - 소프트웨어 이수: {software.get('min', 'N/A')}학점 ({software.get('note', 'N/A')})
-            - 소프트웨어 이수 면제 기준:
-            {software_sub_str}
-            - 졸업 자격 비고:
-            {grad_qual_notes_str}
+            [4. 졸업 자격 (Graduation Qualification)]
+            - 지도교수 상담: {advisor.get('count', 'N/A')}회 이상 ({advisor.get('note', 'N/A')})
+            - 소프트웨어 이수: {software.get('min', 'N/A')}학점 이상 ({software.get('note', 'N/A')})
+            - (SW 인정 과목: {format_list(sw_courses)})
+            - (SW 면제 기준: {format_list(sw_sub)})
+            - 졸업 자격 비고: {format_list(grad_qual_notes)}
 
             [종합 비고]
-            {notes_str}
+            {format_list(requirements.get('notes', []))}
             """
-            # ▲▲▲ [수정 완료] ▲▲A
+            # ▲▲▲ [수정 완료] ▲▲▲
             return context
         else:
             fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다. (적용 학번 범위를 확인해주세요)"
             return fail_msg
             
     except Exception as e:
-        print(f"MongoDB 졸업 요건 검색 오류: {e}")
-        import traceback # 상세 오류 확인
-        traceback.print_exc() # 상세 오류 확인
+        print(f"!!!!!!!!!!!!!! MongoDB 졸업 요건 검색 중 치명적 오류 발생 !!!!!!!!!!!!!!")
+        import traceback
+        traceback.print_exc()
         return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."
