@@ -109,7 +109,7 @@ def transform_query(question: str) -> list[str]:
 
 
 @app.post("/stream")
-async def stream_answer(req: QuestionRequest):
+def stream_answer(req: QuestionRequest):
     question = req.question
     session_id = req.session_id
     user_id = req.user_id
