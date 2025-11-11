@@ -40,21 +40,30 @@ class QuestionRequest(BaseModel):
     session_id: str
     question: str
 
-def get_recent_history(session_id: str, n=3) -> str:
-    if not r: return ""
+def get_recent_history(session_id: str, n=5) -> list[dict]: # n=3 -> n=5 (조절 가능)
+    """
+    Redis에서 최근 N개의 대화 기록을 'messages' API 형식으로 불러옵니다.
+    (예: [{"role": "user", "content": ...}, {"role": "assistant", "content": ...}])
+    """
+    if not r: return [] # 빈 리스트 반환
     try:
         key = f"chat:{session_id}"
-        logs = r.lrange(key, -n * 2, -1)
-        dialogue = []
+        logs = r.lrange(key, -n * 2, -1) # 최근 N*2 (Q, A) 항목
+        
+        messages = []
         for item in logs:
             parsed = json.loads(item)
-            q, a = parsed.get("question"), parsed.get("answer")
-            if q: dialogue.append(f"사용자: {q}")
-            if a: dialogue.append(f"챗봇: {a}")
-        return "\n".join(dialogue)
+            q = parsed.get("question")
+            a = parsed.get("answer")
+            
+            # 저장된 순서(Q, A)를 보장하기 위해 확인 후 추가
+            if q: messages.append({"role": "user", "content": q})
+            if a: messages.append({"role": "assistant", "content": a})
+        
+        return messages # list[dict] 반환
     except Exception as e:
         print(f"Redis 히스토리 조회 오류: {e}")
-        return ""
+        return [] # 오류 시 빈 리스트 반환
 
 def save_chat_history(user_id: str, session_id: str, question: str, answer: str):
     if not r: return
@@ -168,9 +177,9 @@ async def stream_answer(req: QuestionRequest):
             else:
                 print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
                 
-                recent = get_recent_history(session_id)
+                # ▼▼▼ [수정 1] API가 이해하는 'list[dict]' 형태로 대화 기록을 불러옵니다.
+                history_messages = get_recent_history(session_id, n=5) # n=5는 최근 5회 Q/A. 조절 가능
                 
-                # (쿼리 변환 로직은 여기에 포함되지 않았습니다. 필요시 추가)
                 context, _ = search_similar_documents(question)
                 
                 MAX_CONTEXT_LENGTH = 7000
@@ -197,12 +206,11 @@ async def stream_answer(req: QuestionRequest):
                 """
                 # ▲▲▲ [수정 완료] ▲▲▲
                 
+                # ▼▼▼ [수정 3] 'user_prompt'에서는 '이전 대화 기록' 섹션을 제거합니다.
+                #    맥락(Context)과 현재 질문(Question)만 남깁니다.
                 user_prompt = f"""
                 ### 검색된 참고 자료 (참고만 하세요):
                 {context}
-
-                ### 이전 대화 기록:
-                {recent}
 
                 ### 사용자의 질문:
                 {question}
@@ -210,14 +218,28 @@ async def stream_answer(req: QuestionRequest):
                 ### 답변:
                 """
                 
+                # ▼▼▼ [수정 4] API에 전달할 'messages' 리스트를 재구성합니다.
+                messages_to_send = []
+                messages_to_send.append({"role": "system", "content": system_prompt})
+                
+                # [중요] 이전 대화 기록(list[dict])을 먼저 추가합니다.
+                messages_to_send.extend(history_messages) 
+                
+                # [중요] RAG 컨텍스트가 포함된 'user_prompt'를 마지막에 추가합니다.
+                messages_to_send.append({"role": "user", "content": user_prompt})
+
+                # [디버깅용] API에 전달되는 최종 메시지 목록 확인
+                print("--- [API Request] API로 다음 메시지들을 전송합니다: ---")
+                for msg in messages_to_send:
+                    content_preview = (msg['content'][:150] + '...') if len(msg['content']) > 150 else msg['content']
+                    print(f"  {msg['role']}: {content_preview.replace('  ', ' ')}")
+                print("--------------------------------------------------")
+
                 stream = client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    messages=messages_to_send, # <-- (변경) 재구성된 리스트를 전달
                     stream=True,
-                    temperature=0.7 # '자율 대화'를 위해 온도를 약간 높임
+                    temperature=0.7 
                 )
                 
                 collected_answer = ""
@@ -242,9 +264,11 @@ async def stream_answer(req: QuestionRequest):
 @app.post("/ask")
 async def ask(req: QuestionRequest):
     try:
-        recent = get_recent_history(req.session_id)
-        context, _ = search_similar_documents(req.question)
+        # ▼▼▼ [수정 1] API가 이해하는 'list[dict]' 형태로 대화 기록을 불러옵니다.
+        history_messages = get_recent_history(req.session_id, n=5) # n=5는 조절 가능
 
+        context, _ = search_similar_documents(req.question)
+        
         system_prompt = """당신은 경북대학교 안내 챗봇입니다. 당신의 **최우선 임무**는 사용자의 질문 의도를 파악하고, '검색된 참고 자료'를 **최대한 활용**하여 가장 도움이 되는 답변을 생성하는 것입니다.
 
         [답변 생성 핵심 원칙]
@@ -276,12 +300,14 @@ async def ask(req: QuestionRequest):
         ### 답변:
         """
 
+        messages_to_send = []
+        messages_to_send.append({"role": "system", "content": system_prompt})
+        messages_to_send.extend(history_messages) # 이전 기록 추가
+        messages_to_send.append({"role": "user", "content": user_prompt}) # RAG + 새 질문 추가
+
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},  # <-- 수정: AI의 역할과 규칙
-                {"role": "user", "content": user_prompt}     # <-- 수정: 질문과 데이터
-            ],
+            messages=messages_to_send, # <-- (변경)
             temperature=0.7,
         )
         answer = response.choices[0].message.content.strip()
@@ -294,7 +320,6 @@ async def ask(req: QuestionRequest):
         traceback.print_exc()
         return JSONResponse(content={"error": f"답변 생성 중 오류: {e}"}, status_code=500)
     
-
 # 2025-09-21
 
 # URL 경로에 user_id를 받도록 변경: @app.get("/sessions") -> @app.get("/sessions/{user_id}")
