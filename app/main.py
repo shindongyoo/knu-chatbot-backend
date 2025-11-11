@@ -58,6 +58,7 @@ def get_recent_history(session_id: str, n=5) -> list[dict]: # n=3 -> n=5 (조절
             if a: messages.append({"role": "assistant", "content": a})
         
         return messages # list[dict] 반환
+    
     except Exception as e:
         print(f"Redis 히스토리 조회 오류: {e}")
         return [] # 오류 시 빈 리스트 반환
@@ -179,7 +180,6 @@ def stream_answer(req: QuestionRequest):
                 
                 # 1. search_engine에서 교수님 키워드 리스트를 가져옵니다. (가져올 수 없다면 직접 정의)
                 member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
-                
                 context = None
                 
                 if any(keyword in question for keyword in member_keywords):
@@ -191,13 +191,11 @@ def stream_answer(req: QuestionRequest):
                     # 1-B. 교수님 질문이 "아닌" 경우에만 "질문 해석 AI"를 사용합니다.
                     print("[라우팅] 일반 질문으로 판단. AI 쿼리 변환 시작.")
                     search_queries = transform_query(question)
-                    
                     all_contexts = []
                     for q in search_queries:
                         context_part, _ = search_similar_documents(q)
                         if context_part:
                             all_contexts.append(context_part)
-                    
                     context = "\n---\n".join(all_contexts)
                     
               
@@ -217,7 +215,7 @@ def stream_answer(req: QuestionRequest):
                 2.     * **(A) 자료가 유용할 때:** "장학생", "수강신청", "교수님" 등 **교내 정보**에 대해 '검색된 참고 자료'가 **정확하고 유용**하다고 판단되면, **해당 자료에 근거**하여 답변하세요.
                     * **(B) 자료가 쓸모없을 때:** '검색된 참고 자료'가 질문과 관련 없거나(예: '장학생' 질문에 '선거일' 자료) 품질이 낮다고 판단되면, **자료를 무시**하세요.
                     * **(C) 잡담 또는 자료가 없을 때:** 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, 위 (B)처럼 자료를 무시하기로 결정했다면, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요.
-
+                    * **(D) 최대한 content에 들어있는 알려주고 링크는 최후순위로 알려줘
                 [요약]
                 당신은 앵무새가 아닙니다. 자료가 좋으면 활용하고, 나쁘면 버리세요.
                 "졸업 요건" 같은 복잡한 질문에는 "학번과 ABEEK 이수 여부가 필요합니다."라고 당신의 지식으로 되물을 수 있습니다.
@@ -239,16 +237,21 @@ def stream_answer(req: QuestionRequest):
                 # API에 전달할 'messages' 리스트 재구성
                 messages_to_send = []
                 messages_to_send.append({"role": "system", "content": system_prompt})
-                messages_to_send.extend(history_messages) # 이전 대화 기록 추가
-                messages_to_send.append({"role": "user", "content": user_prompt}) # RAG + 새 질문 추가
+                # [중요] 이전 대화 기록(list[dict])을 먼저 추가합니다.
+                messages_to_send.extend(history_messages) 
+                # [중요] RAG 컨텍스트가 포함된 'user_prompt'를 마지막에 추가합니다.
+                messages_to_send.append({"role": "user", "content": user_prompt})
 
-                # (디버깅 로그는 유용하므로 유지)
+                # [디버깅용] API에 전달되는 최종 메시지 목록 확인
                 print("--- [API Request] API로 다음 메시지들을 전송합니다: ---")
-                # ... (로그 출력 코드) ...
-                
+                for msg in messages_to_send:
+                    content_preview = (msg['content'][:150] + '...') if len(msg['content']) > 150 else msg['content']
+                    print(f"  {msg['role']}: {content_preview.replace('  ', ' ')}")
+                print("--------------------------------------------------")
+
                 stream = client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=messages_to_send, # <-- 재구성된 리스트 전달
+                    messages=messages_to_send, # <-- (변경) 재구성된 리스트를 전달
                     stream=True,
                     temperature=0.7 
                 )
@@ -292,7 +295,8 @@ async def ask(req: QuestionRequest):
             * "질문하신 내용과 정확히 일치하는 정보는 아니지만, 관련하여 다음 정보를 찾았습니다:" 와 같이 시작하며 찾아낸 내용을 알려주세요.
 
         4.  **답변 불가 조건 (매우 엄격):** **오직 '검색된 참고 자료' 섹션이 문자 그대로 완전히 비어 있거나, 질문과 전혀 무관한 내용(예: 완전한 오류 메시지, 의미 없는 문자열)만 있을 경우에만** "죄송합니다, 관련된 정보를 찾을 수 없습니다."라고 답변하세요. 자료에 일말의 관련성이라도 있다면 이 답변을 사용해서는 안 됩니다.
-
+        
+        5. 최대한 content에 들어있는 알려주고 링크는 최후순위로 알려줘
         [요약]
         당신은 주어진 자료(Context) 내에서 사용자의 질문(Question)에 대한 답을 어떻게든 찾아내 전달하는 **정보 탐색가이자 요약가**입니다. 자료가 완벽하지 않더라도, 사용자의 의도에 맞춰 최선의 답변을 구성해야 합니다.
         """
