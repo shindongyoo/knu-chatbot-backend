@@ -207,7 +207,7 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
     """
     print("--- [get_graduation_info] 함수 시작 ---")
     try:
-        collection = chatbot_db["graduation_requirements"] 
+        collection = chatbot_db["graduation_requirements2"] 
         print(f"--- [get_graduation_info] 컬렉션 '{collection.name}' 선택 완료 ---")
         
         # --- [1. 학번 변환 로직] ---
