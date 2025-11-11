@@ -79,7 +79,25 @@ def save_chat_history(user_id: str, session_id: str, question: str, answer: str)
 def root():
     return {"message": "KNU Chatbot backend is running"}
 
-# app/main.py의 stream_answer 함수를 이걸로 통째로 덮어쓰세요.
+def transform_query(question: str) -> list[str]:
+    """AI를 사용해 사용자의 애매한 질문을 구체적인 검색어로 변환합니다."""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "당신은 사용자의 질문 1개를 Vector DB에서 검색하기 좋은 구체적인 검색어 3개로 바꾸는 쿼리 변환 전문가입니다. 각 검색어는 쉼표(,)로 구분해서 응답하세요."},
+                {"role": "user", "content": f"다음 질문을 검색어로 바꿔줘: {question}"}
+            ],
+            temperature=0
+        )
+        transformed_queries = response.choices[0].message.content.strip()
+        queries = [q.strip() for q in transformed_queries.split(',')][:3] # 최대 3개
+        print(f"[쿼리 변환] 원본: '{question}' -> 변환: {queries}")
+        return queries
+    except Exception as e:
+        print(f"쿼리 변환 실패: {e}")
+        return [question] # 실패하면 원래 질문으로 검색
+
 
 @app.post("/stream")
 async def stream_answer(req: QuestionRequest):
@@ -87,46 +105,35 @@ async def stream_answer(req: QuestionRequest):
     session_id = req.session_id
     user_id = req.user_id
 
-# search_engine.py에서 새 함수를 import 합니다. (나중에 만듦)
     from app.search_engine import get_graduation_info
 
     def event_generator():
         try:
-            # --- 1. 상태 확인 ---
-            # 사용자가 "기다리던" 답변을 했는지 확인
             state_key = f"state:{session_id}"
             current_state = r.get(state_key)
 
+            # --- [유지] 1. '졸업요건' 2단계 처리 ---
             if current_state == "awaiting_grad_info":
                 print(f"[상태 감지] 'awaiting_grad_info' 상태입니다. 입력: {question}")
-                # 2. 학번/ABEEK 정보 파싱
                 try:
                     student_id, abeek_status_input = question.strip().split('/')
-                    # 3. MongoDB에 저장된 True/False (불리언) 값으로 변환
                     abeek_bool_value = True if abeek_status_input.upper() == 'O' else False
                     print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_bool_value}")
                 
                 except Exception as e:
-                    # (파싱 실패 로직)
                     error_text = '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 \'18/O\' 형식으로 다시 입력해주세요.'
                     yield f"data: {json.dumps({'text': error_text})}\n\n"
                     return
 
-                # 4. MongoDB 검색 (이제 "18", True 처럼 올바른 값으로 검색)
                 context = get_graduation_info(student_id, abeek_bool_value)
-                
-                # 4. 상태 초기화
-                r.delete(state_key)
+                r.delete(state_key) # 상태 초기화
 
-                # 5. 최종 RAG 답변 생성
                 system_prompt = "당신은 경북대학교 졸업 요건 안내 전문가입니다. 오직 '검색된 졸업 요건' 자료에만 근거하여 사용자에게 맞춤형 졸업 정보를 안내하세요."
                 user_prompt = f"""
                 ### 검색된 졸업 요건:
                 {context if context else "일치하는 졸업 요건을 찾지 못했습니다."}
-
                 ### 사용자의 질문 (요약):
                 {student_id}학번, ABEEK {abeek_status_input} 학생의 졸업 요건
-                
                 ### 답변:
                 """
                 
@@ -146,88 +153,81 @@ async def stream_answer(req: QuestionRequest):
                         collected_answer += delta
                         yield f"data: {json.dumps({'text': delta})}\n\n"
                 
-                # 이 대화는 "졸업요건" -> "18/O" -> "답변" 이므로, 원본 질문으로 저장
-                save_chat_history(user_id, session_id, "졸업 요건 알려줘", collected_answer)
+                save_chat_history(user_id, session_id, "졸업 요건 질문", collected_answer)
                 return # 작업 완료
 
-            # --- 2. "졸업요건" 의도 감지 (새 질문일 경우) ---
+            # --- [유지] 2. '졸업요건' 1단계 의도 감지 ---
             if "졸업요건" in question or "졸업 요건" in question:
                 print(f"[의도 감지] '졸업요건' 질문을 감지했습니다.")
-                # 3. 상태 설정 (5분간 유효)
                 r.set(state_key, "awaiting_grad_info", ex=300) 
-                
-                # 4. 역질문 전송
                 follow_up_question = "졸업 요건을 확인하기 위해, 학번(예: 18, 19, 20...)과 ABEEK 이수 여부(O/X)를 **'18/O'** 형식으로 입력해주세요."
                 yield f"data: {json.dumps({'text': follow_up_question})}\n\n"
-                
-                # (히스토리 저장은 최종 답변이 올 때 하므로 지금은 하지 않음)
                 return # 작업 완료
 
-            # --- 3. 일반 RAG 질문 처리 (기존 로직) ---
-            print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
-            
-            recent = get_recent_history(session_id)
-            
-            # (쿼리 변환 로직은 여기에 포함되지 않았습니다. 필요시 추가)
-            context, _ = search_similar_documents(question)
-            
-            MAX_CONTEXT_LENGTH = 7000
-            if len(context) > MAX_CONTEXT_LENGTH:
-                context = context[:MAX_CONTEXT_LENGTH]
+            # --- [핵심 수정] 3. '일반 질문' 처리 ---
+            else:
+                print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
+                
+                recent = get_recent_history(session_id)
+                
+                # (쿼리 변환 로직은 여기에 포함되지 않았습니다. 필요시 추가)
+                context, _ = search_similar_documents(question)
+                
+                MAX_CONTEXT_LENGTH = 7000
+                if len(context) > MAX_CONTEXT_LENGTH:
+                    context = context[:MAX_CONTEXT_LENGTH]
 
-            print("--- [AI 전달 직전] 최종 컨텍스트 내용: ---")
-            print(context[:500] + "...") # <-- 여기가 문제!
-            print("---------------------------------------")
+                # ▼▼▼ [수정된 system_prompt] ▼▼▼
+                system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다.
 
-            system_prompt = """당신은 경북대학교 안내 챗봇입니다. 당신의 **최우선 임무**는 사용자의 질문 의도를 파악하고, '검색된 참고 자료'를 **최대한 활용**하여 가장 도움이 되는 답변을 생성하는 것입니다.
+                [당신의 임무]
+                당신은 '검색된 참고 자료'와 '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
 
-            [답변 생성 핵심 원칙]
-            1.  **자료 우선:** 당신의 답변은 **오직 '검색된 참고 자료'에만 근거**해야 합니다. 외부 지식이나 추측은 절대 금지됩니다.
-            
-            2.  **질문 의도 파악 + 자료 활용:** '검색된 참고 자료'는 데이터베이스가 사용자의 질문과 가장 유사하다고 판단하여 **최선을 다해 찾아온 결과**입니다. 당신의 임무는 이 자료를 분석하여, **사용자의 원래 질문 의도에 맞는 정보가 조금이라도 있는지** 찾아내 답변을 구성하는 것입니다.
-                * 예시: 사용자가 '지도교수상담'을 물었고 자료에 '신입생 OT' 내용만 있더라도, 그 안에서 '지도교수 배정' 관련 언급을 찾아내 알려줘야 합니다.
+                [행동 지침]
+                1.  **[1단계: 자료 평가]** 먼저 '검색된 참고 자료'가 사용자의 질문과 관련성이 높은지 스스로 평가합니다.
+                
+                2.  **[2단계: 답변 생성]**
+                    * **(A) 자료가 유용할 때:** "장학생", "수강신청", "교수님" 등 **교내 정보**에 대해 '검색된 참고 자료'가 **정확하고 유용**하다고 판단되면, **해당 자료에 근거**하여 답변하세요.
+                    * **(B) 자료가 쓸모없을 때:** '검색된 참고 자료'가 질문과 관련 없거나(예: '장학생' 질문에 '선거일' 자료) 품질이 낮다고 판단되면, **자료를 무시**하세요.
+                    * **(C) 잡담 또는 자료가 없을 때:** 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, 위 (B)처럼 자료를 무시하기로 결정했다면, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요.
 
-            3.  **적극적인 정보 제공:** 자료의 내용이 질문과 100% 일치하지 않더라도, **관련성이 조금이라도 있다면** 그 정보를 요약해서 제공해야 합니다. "정보를 찾을 수 없다"는 답변은 최후의 수단입니다.
-                * "질문하신 내용과 정확히 일치하는 정보는 아니지만, 관련하여 다음 정보를 찾았습니다:" 와 같이 시작하며 찾아낸 내용을 알려주세요.
+                [요약]
+                당신은 앵무새가 아닙니다. 자료가 좋으면 활용하고, 나쁘면 버리세요.
+                "졸업 요건" 같은 복잡한 질문에는 "학번과 ABEEK 이수 여부가 필요합니다."라고 당신의 지식으로 되물을 수 있습니다.
+                """
+                # ▲▲▲ [수정 완료] ▲▲▲
+                
+                user_prompt = f"""
+                ### 검색된 참고 자료 (참고만 하세요):
+                {context}
 
-            4.  **답변 불가 조건 (매우 엄격):** **오직 '검색된 참고 자료' 섹션이 문자 그대로 완전히 비어 있거나, 질문과 전혀 무관한 내용(예: 완전한 오류 메시지, 의미 없는 문자열)만 있을 경우에만** "죄송합니다, 관련된 정보를 찾을 수 없습니다."라고 답변하세요. 자료에 일말의 관련성이라도 있다면 이 답변을 사용해서는 안 됩니다.
+                ### 이전 대화 기록:
+                {recent}
 
-            [요약]
-            당신은 주어진 자료(Context) 내에서 사용자의 질문(Question)에 대한 답을 어떻게든 찾아내 전달하는 **정보 탐색가이자 요약가**입니다. 자료가 완벽하지 않더라도, 사용자의 의도에 맞춰 최선의 답변을 구성해야 합니다.
-            """
+                ### 사용자의 질문:
+                {question}
 
-            # 2. 'user' 프롬프트에는 질문과 참고 자료(데이터)만 깔끔하게 전달합니다.
-            user_prompt = f"""
-            ### 검색된 참고 자료:
-            {context}
-
-            ### 이전 대화 기록:
-            {recent}
-
-            ### 사용자의 질문:
-            {question}
-
-            ### 답변:
-            """
-            
-            stream = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},  # <-- 수정: AI의 역할과 규칙
-                    {"role": "user", "content": user_prompt}     # <-- 수정: 질문과 데이터
-                ],
-                stream=True,
-                temperature=0.2
-            )
-            
-            collected_answer = ""
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
-                if delta:
-                    collected_answer += delta
-                    yield f"data: {json.dumps({'text': delta})}\n\n"
-            
-            save_chat_history(user_id, session_id, question, collected_answer)
+                ### 답변:
+                """
+                
+                stream = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    stream=True,
+                    temperature=0.7 # '자율 대화'를 위해 온도를 약간 높임
+                )
+                
+                collected_answer = ""
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        collected_answer += delta
+                        yield f"data: {json.dumps({'text': delta})}\n\n"
+                
+                save_chat_history(user_id, session_id, question, collected_answer)
 
         except Exception as e:
             print(f"!!!!!!!!!!!!!! 스트림 중 심각한 오류 발생 !!!!!!!!!!!!!!")
@@ -237,6 +237,7 @@ async def stream_answer(req: QuestionRequest):
             yield f"data: {error_message}\n\n"
             
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 
 @app.post("/ask")
 async def ask(req: QuestionRequest):
