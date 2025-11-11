@@ -306,9 +306,6 @@ async def ask(req: QuestionRequest):
         ### 검색된 참고 자료:
         {context}
 
-        ### 이전 대화 기록:
-        {history_messages}
-
         ### 사용자의 질문:
         {req.question}
 
