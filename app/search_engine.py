@@ -219,8 +219,12 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
                 if is_match:
                     result = req_doc
                     break 
-            except Exception:
-                continue
+            except Exception as e: # <--- 'except Exception:' -> 'except Exception as e:'
+                print(f"!!!!!!!!!!!!!! 범위 매칭 중 오류 발생 !!!!!!!!!!!!!!")
+                print(f"    -> 입력 학번: {search_year}, 범위 문자열: '{range_str}'")
+                print(f"    -> 오류 내용: {e}")
+                traceback.print_exc() # 상세 오류 스택 출력
+                continue # 다음 루프로 넘어감
             
         # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
