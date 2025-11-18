@@ -104,173 +104,89 @@ def transform_query(question: str) -> list[str]:
     except Exception as e:
         print(f"쿼리 변환 실패: {e}")
         return [question] # 실패하면 원래 질문으로 검색
-
+    
 
 @app.post("/stream")
-def stream_answer(req: QuestionRequest):
+def stream_answer(req: QuestionRequest): # "async" 제거
     question = req.question
     session_id = req.session_id
     user_id = req.user_id
 
-    
+    # 'get_graduation_info' import 삭제 (AI가 자율 판단)
 
     def event_generator():
         try:
-            state_key = f"state:{session_id}"
-            current_state = r.get(state_key)
+            # --- [수정] '졸업요건' 관련 if문, 상태 확인 로직 모두 삭제 ---
+            # --- 모든 질문을 이 '자율' 로직으로 처리 ---
+            
+            print(f"[자율 AI 판단] '{question}'에 대한 RAG + 자율 판단 시작")
+            
+            # 1. (항상) 이전 대화 기록 불러오기 (맥락 파악용)
+            history_messages = get_recent_history(session_id, n=5)
+            
+            # 2. (항상) DB에서 참고 자료를 "일단" 검색합니다.
+            context, _ = search_similar_documents(question) 
+            
+            MAX_CONTEXT_LENGTH = 7000
+            if len(context) > MAX_CONTEXT_LENGTH:
+                context = context[:MAX_CONTEXT_LENGTH]
 
-            # --- [유지] 1. '졸업요건' 2단계 처리 ---
-            if current_state == "awaiting_grad_info":
-                print(f"[상태 감지] 'awaiting_grad_info' 상태입니다. 입력: {question}")
-                try:
-                    student_id, abeek_status_input = question.strip().split('/')
-                    abeek_bool_value = True if abeek_status_input.upper() == 'O' else False
-                    print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_bool_value}")
-                
-                except Exception as e:
-                    error_text = '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 \'18/O\' 형식으로 다시 입력해주세요.'
-                    yield f"data: {json.dumps({'text': error_text})}\n\n"
-                    return
+            # 3. AI의 두뇌(시스템 프롬프트)에 "자율권"을 부여합니다.
+            system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다.
 
-                context = get_graduation_info(student_id, abeek_bool_value)
-                r.delete(state_key) # 상태 초기화
+            [당신의 임무]
+            당신은 '검색된 참고 자료', '이전 대화 기록', '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
 
-                system_prompt = "당신은 경북대학교 졸업 요건 안내 전문가입니다. 오직 '검색된 졸업 요건' 자료에만 근거하여 사용자에게 맞춤형 졸업 정보를 안내하세요."
-                user_prompt = f"""
-                ### 검색된 졸업 요건:
-                {context if context else "일치하는 졸업 요건을 찾지 못했습니다."}
-                ### 사용자의 질문 (요약):
-                {student_id}학번, ABEEK {abeek_status_input} 학생의 졸업 요건
-                ### 답변:
-                """
-                
-                stream = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    stream=True, temperature=0.2
-                )
-                
-                collected_answer = ""
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content or ""
-                    if delta:
-                        collected_answer += delta
-                        yield f"data: {json.dumps({'text': delta})}\n\n"
-                
-                save_chat_history(user_id, session_id, "졸업 요건 질문", collected_answer)
-                return # 작업 완료
+            [행동 지침]
+            1.  **[1단계: 질문 의도 파악]** 먼저 '이전 대화 기록'을 확인하여, 사용자의 새 질문이 "그럼", "거기서" 등 이전 대화에 이어지는 **'후속 질문'**인지, 아니면 **'새로운 질문'**인지 판단합니다.
+            
+            2.  **[2단계: 답변 생성]**
+                * **(A) '후속 질문'일 경우:** (예: "그럼 이메일은?")
+                    - **'이전 대화 기록'을 최우선**으로 참고하여 답변합니다.
+                    - 이 경우 '검색된 참고 자료'는 무시하고 기억을 바탕으로 답하세요.
+                * **(B) '새로운 질문'일 경우:** (예: "장학생 정보 알려줘")
+                    - **'검색된 참고 자료'를 최우선**으로 평가합니다.
+                    - (B-1) 자료가 유용하면: 자료에 근거하여 답변합니다.
+                    - (B-2) 자료가 쓸모없으면 (관련 없거나 비어있음): 자료를 무시하고, [규칙 3]에 따라 행동합니다.
 
-            # --- [유지] 2. '졸업요건' 1단계 의도 감지 ---
-            if "졸업요건" in question or "졸업 요건" in question:
-                print(f"[의도 감지] '졸업요건' 질문을 감지했습니다.")
-                r.set(state_key, "awaiting_grad_info", ex=300) 
-                follow_up_question = "졸업 요건을 확인하기 위해, 학번(예: 18, 19, 20...)과 ABEEK 이수 여부(O/X)를 **'18/O'** 형식으로 입력해주세요."
-                yield f"data: {json.dumps({'text': follow_up_question})}\n\n"
-                return # 작업 완료
+            3.  **[3단계: 잡담 또는 정보 없음]**
+                * 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, (B-2)처럼 쓸모없는 자료를 받은 '새로운 질문'일 경우, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요.
+                * (중요) "졸업 요건"처럼 복잡한 교내 정보 질문인데 자료가 없다면, 당신의 지식으로 "졸업 요건을 확인하려면 학번과 ABEEK 이수 여부가 필요합니다."라고 **스스로 되물을 수 있습니다.**
+            """
+            
+            # 4. 'user_prompt'에는 맥락(Context)과 현재 질문(Question)만 남깁니다.
+            user_prompt = f"""
+            ### 검색된 참고 자료 (AI가 참고할 자료):
+            {context}
 
-            # --- [핵심 수정] 3. '일반 질문' 처리 ---
-            else:
-                print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
-                
-                # 1. [통합] API가 이해하는 'list[dict]' 형태로 대화 기록을 "한 번만" 불러옵니다.
-                history_messages = get_recent_history(session_id, n=5)
-                
-                # 1. search_engine에서 교수님 키워드 리스트를 가져옵니다. (가져올 수 없다면 직접 정의)
-                member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
-                context = None
-                
-                if any(keyword in question for keyword in member_keywords):
-                    # 1-A. 교수님 질문이면, search_similar_documents를 "딱 한 번만" 호출합니다.
-                    print("[라우팅] 교수님 질문으로 판단. MongoDB 검색 시도.")
-                    context, _ = search_similar_documents(question)
-                
-                else:
-                    # 1-B. 교수님 질문이 "아닌" 경우에만 "질문 해석 AI"를 사용합니다.
-                    print("[라우팅] 일반 질문으로 판단. AI 쿼리 변환 시작.")
-                    search_queries = transform_query(question)
-                    all_contexts = []
-                    for q in search_queries:
-                        context_part, _ = search_similar_documents(q)
-                        if context_part:
-                            all_contexts.append(context_part)
-                    context = "\n---\n".join(all_contexts)
-                    
-              
-                MAX_CONTEXT_LENGTH = 7000
-                if len(context) > MAX_CONTEXT_LENGTH:
-                    context = context[:MAX_CONTEXT_LENGTH]
+            ### 사용자의 질문:
+            {question}
 
-                # ▼▼▼ [수정된 system_prompt] ▼▼▼
-                system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다. 당신은 사용자의 '이전 대화 기록'을 기억하고 맥락을 파악할 수 있습니다.
-
-                [당신의 임무]
-                당신은 '검색된 참고 자료'와 '이전 대화 기록', '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
-
-                [행동 지침]
-                1.  **[1단계: 질문 의도 파악]** 먼저 '이전 대화 기록'을 확인하여, 사용자의 새 질문이 "그럼", "거기서", "그분은" 등 이전 대화에 이어지는 **'후속 질문'**인지, 아니면 **'새로운 질문'**인지 판단합니다.
-                
-                2.  **[2단계: 답변 생성]**
-                    * **(A) '후속 질문'일 경우:** (예: "그럼 이메일은?")
-                        - **'이전 대화 기록'을 최우선**으로 참고하여 답변합니다.
-                        - 이 경우 '검색된 참고 자료'는 비어있거나 관련 없을 수 있습니다. **자료를 무시하고 기억을 바탕으로 답하세요.**
-                        - 예: (이전에 '한세경 교수'를 답했다면) "네, 한세경 교수님의 이메일 주소는 XXX@knu.ac.kr입니다."
-                    
-                    * **(B) '새로운 질문'일 경우:** (예: "장학생 정보 알려줘")
-                        - **'검색된 참고 자료'를 최우선**으로 평가합니다.
-                        - (B-1) 자료가 유용하면: 자료에 근거하여 답변합니다.
-                        - (B-2) 자료가 쓸모없으면 (관련 없거나 비어있음): 자료를 무시하고, [규칙 3]에 따라 행동합니다.
-
-                3.  **[3단계: 잡담 또는 정보 없음]**
-                    * 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, (B-2)처럼 쓸모없는 자료를 받은 '새로운 질문'일 경우, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요. (단, 없는 교내 정보를 지어내지는 마세요.)
-                """
-                
-                # ▲▲▲ [수정 완료] ▲▲▲
-                
-                # ▼▼▼ [수정 3] 'user_prompt'에서는 '이전 대화 기록' 섹션을 제거합니다.
-                #    맥락(Context)과 현재 질문(Question)만 남깁니다.
-                user_prompt = f"""
-                ### 검색된 참고 자료 (참고만 하세요):
-                {context}
-
-                ### 사용자의 질문:
-                {question}
-
-                ### 답변:
-                """
-                
-                # API에 전달할 'messages' 리스트 재구성
-                messages_to_send = []
-                messages_to_send.append({"role": "system", "content": system_prompt})
-                # [중요] 이전 대화 기록(list[dict])을 먼저 추가합니다.
-                messages_to_send.extend(history_messages) 
-                # [중요] RAG 컨텍스트가 포함된 'user_prompt'를 마지막에 추가합니다.
-                messages_to_send.append({"role": "user", "content": user_prompt})
-
-                # [디버깅용] API에 전달되는 최종 메시지 목록 확인
-                print("--- [API Request] API로 다음 메시지들을 전송합니다: ---")
-                for msg in messages_to_send:
-                    content_preview = (msg['content'][:150] + '...') if len(msg['content']) > 150 else msg['content']
-                    print(f"  {msg['role']}: {content_preview.replace('  ', ' ')}")
-                print("--------------------------------------------------")
-
-                stream = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=messages_to_send, # <-- (변경) 재구성된 리스트를 전달
-                    stream=True,
-                    temperature=0.7 
-                )
-                
-                collected_answer = ""
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content or ""
-                    if delta:
-                        collected_answer += delta
-                        yield f"data: {json.dumps({'text': delta})}\n\n"
-                
-                save_chat_history(user_id, session_id, question, collected_answer)
+            ### 답변:
+            """
+            
+            # 5. API에 전달할 'messages' 리스트를 재구성합니다.
+            messages_to_send = []
+            messages_to_send.append({"role": "system", "content": system_prompt})
+            messages_to_send.extend(history_messages) # 이전 대화 기록
+            messages_to_send.append({"role": "user", "content": user_prompt}) # 새 질문 + RAG 자료
+            
+            stream = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages_to_send,
+                stream=True,
+                temperature=0.7 # 자율성을 위해 약간의 창의성 부여
+            )
+            
+            collected_answer = ""
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    collected_answer += delta
+                    yield f"data: {json.dumps({'text': delta})}\n\n"
+            
+            # 6. (수정) 상태 저장 로직 삭제. 모든 대화를 단순 저장
+            save_chat_history(user_id, session_id, question, collected_answer)
 
         except Exception as e:
             print(f"!!!!!!!!!!!!!! 스트림 중 심각한 오류 발생 !!!!!!!!!!!!!!")
@@ -282,40 +198,43 @@ def stream_answer(req: QuestionRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+# app/main.py의 @app.post("/ask") 함수 전체를 이걸로 교체하세요.
+
 @app.post("/ask")
 async def ask(req: QuestionRequest):
     try:
-        # ▼▼▼ [수정 1] API가 이해하는 'list[dict]' 형태로 대화 기록을 불러옵니다.
-        history_messages = get_recent_history(req.session_id, n=5) # n=5는 조절 가능
+        # 1. 이전 대화 기록 불러오기
+        history_messages = get_recent_history(req.session_id, n=5)
 
+        # 2. DB 검색
         context, _ = search_similar_documents(req.question)
         
-        system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다. 당신은 사용자의 '이전 대화 기록'을 기억하고 맥락을 파악할 수 있습니다.
+        # 3. 자율 AI 프롬프트 (위 /stream과 동일)
+        system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다.
 
-        [당신의 임무]
-        당신은 '검색된 참고 자료'와 '이전 대화 기록', '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
+            [당신의 임무]
+            당신은 '검색된 참고 자료', '이전 대화 기록', '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
 
-        [행동 지침]
-        1.  **[1단계: 질문 의도 파악]** 먼저 '이전 대화 기록'을 확인하여, 사용자의 새 질문이 "그럼", "거기서", "그분은" 등 이전 대화에 이어지는 **'후속 질문'**인지, 아니면 **'새로운 질문'**인지 판단합니다.
-        
-        2.  **[2단계: 답변 생성]**
-            * **(A) '후속 질문'일 경우:** (예: "그럼 이메일은?")
-                - **'이전 대화 기록'을 최우선**으로 참고하여 답변합니다.
-                - 이 경우 '검색된 참고 자료'는 비어있거나 관련 없을 수 있습니다. **자료를 무시하고 기억을 바탕으로 답하세요.**
-                - 예: (이전에 '한세경 교수'를 답했다면) "네, 한세경 교수님의 이메일 주소는 XXX@knu.ac.kr입니다."
+            [행동 지침]
+            1.  **[1단계: 질문 의도 파악]** 먼저 '이전 대화 기록'을 확인하여, 사용자의 새 질문이 "그럼", "거기서" 등 이전 대화에 이어지는 **'후속 질문'**인지, 아니면 **'새로운 질문'**인지 판단합니다.
             
-            * **(B) '새로운 질문'일 경우:** (예: "장학생 정보 알려줘")
-                - **'검색된 참고 자료'를 최우선**으로 평가합니다.
-                - (B-1) 자료가 유용하면: 자료에 근거하여 답변합니다.
-                - (B-2) 자료가 쓸모없으면 (관련 없거나 비어있음): 자료를 무시하고, [규칙 3]에 따라 행동합니다.
+            2.  **[2단계: 답변 생성]**
+                * **(A) '후속 질문'일 경우:** (예: "그럼 이메일은?")
+                    - **'이전 대화 기록'을 최우선**으로 참고하여 답변합니다.
+                    - 이 경우 '검색된 참고 자료'는 무시하고 기억을 바탕으로 답하세요.
+                * **(B) '새로운 질문'일 경우:** (예: "장학생 정보 알려줘")
+                    - **'검색된 참고 자료'를 최우선**으로 평가합니다.
+                    - (B-1) 자료가 유용하면: 자료에 근거하여 답변합니다.
+                    - (B-2) 자료가 쓸모없으면 (관련 없거나 비어있음): 자료를 무시하고, [규칙 3]에 따라 행동합니다.
 
-        3.  **[3단계: 잡담 또는 정보 없음]**
-            * 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, (B-2)처럼 쓸모없는 자료를 받은 '새로운 질문'일 경우, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요. (단, 없는 교내 정보를 지어내지는 마세요.)
-        """
+            3.  **[3단계: 잡담 또는 정보 없음]**
+                * 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, (B-2)처럼 쓸모없는 자료를 받은 '새로운 질문'일 경우, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요.
+                * (중요) "졸업 요건"처럼 복잡한 교내 정보 질문인데 자료가 없다면, 당신의 지식으로 "졸업 요건을 확인하려면 학번과 ABEEK 이수 여부가 필요합니다."라고 **스스로 되물을 수 있습니다.**
+            """
         
-        # 2. 'user' 프롬프트에는 질문과 참고 자료(데이터)만 전달합니다.
+        # 4. User 프롬프트 (이전 대화 기록 제거)
         user_prompt = f"""
-        ### 검색된 참고 자료:
+        ### 검색된 참고 자료 (AI가 참고할 자료):
         {context}
 
         ### 사용자의 질문:
@@ -324,14 +243,15 @@ async def ask(req: QuestionRequest):
         ### 답변:
         """
 
+        # 5. Messages 리스트 재구성
         messages_to_send = []
         messages_to_send.append({"role": "system", "content": system_prompt})
-        messages_to_send.extend(history_messages) # 이전 기록 추가
-        messages_to_send.append({"role": "user", "content": user_prompt}) # RAG + 새 질문 추가
+        messages_to_send.extend(history_messages) 
+        messages_to_send.append({"role": "user", "content": user_prompt}) 
 
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=messages_to_send, # <-- (변경)
+            messages=messages_to_send,
             temperature=0.7,
         )
         answer = response.choices[0].message.content.strip()
@@ -343,7 +263,7 @@ async def ask(req: QuestionRequest):
         import traceback
         traceback.print_exc()
         return JSONResponse(content={"error": f"답변 생성 중 오류: {e}"}, status_code=500)
-    
+
 # 2025-09-21
 
 # URL 경로에 user_id를 받도록 변경: @app.get("/sessions") -> @app.get("/sessions/{user_id}")
