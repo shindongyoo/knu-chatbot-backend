@@ -3,6 +3,7 @@ import os
 import re
 import faiss
 import pickle
+import traceback
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS as LangChainFAISS
 from langchain_openai import OpenAIEmbeddings
@@ -176,20 +177,20 @@ def search_similar_documents(query: str, top_k: int = 3) -> str:
     else:
         return context
 
-import re 
-import traceback
+
 @tool
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
     """
-    '졸업 요건'에 대한 질문에 "최종적으로" 답할 때 사용합니다. 
-    반드시 사용자의 'student_id_prefix'(예: "20")와 'abeek_bool'(True/False)을 
-    먼저 알아낸 후에만 이 도구를 호출해야 합니다.
+    [진단 모드] 졸업 요건 검색 함수
     """
-    print(f"\n--- [에이전트 도구 2: 졸업요건 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool} ---")
+    print(f"\n--- [진단 시작] 학번: {student_id_prefix}, ABEEK: {abeek_bool} ---")
+    
     try:
-        collection = chatbot_db["graduation_requirements"] 
+        # 1. 컬렉션 이름 확인 (가장 흔한 원인!)
+        COLLECTION_NAME = "graduation_requirements" # <--- 님 DB 컬렉션 이름과 같은지 꼭 확인!
+        collection = chatbot_db[COLLECTION_NAME] 
         
-        # (학번 변환 로직은 그대로 유지)
+        # 2. 학번 변환
         search_year = -1 
         try:
             year_prefix_num = int(student_id_prefix)
@@ -197,36 +198,52 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
                 search_year = 2000 + year_prefix_num 
             else:
                 search_year = year_prefix_num
+            print(f"[1. 학번 변환] 입력 '{student_id_prefix}' -> 검색용 연도 '{search_year}'")
         except ValueError:
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
         
-        # (학번 범위 검색 로직은 그대로 유지)
+        # 3. DB 쿼리 실행
         query = { "abeek": abeek_bool }
+        print(f"[2. DB 쿼리] 조건: {query}")
+        
         all_reqs_for_abeek = list(collection.find(query))
+        print(f"[3. 쿼리 결과] 총 {len(all_reqs_for_abeek)}개의 문서를 찾았습니다.")
+        
+        if len(all_reqs_for_abeek) == 0:
+            print("⚠️ [경고] 해당 조건의 문서가 0개입니다. 컬렉션 이름이나 데이터(abeek 필드)를 확인하세요.")
+            return f"DB에서 ABEEK 상태가 {abeek_bool}인 문서를 하나도 찾지 못했습니다."
+
         result = None 
         
-        for req_doc in all_reqs_for_abeek:
-            range_str = req_doc.get("applied_year_range", "") 
-            start_year, end_year = -1, float('inf') 
+        # 4. 매칭 루프
+        print("[4. 범위 매칭 시작]")
+        for i, req_doc in enumerate(all_reqs_for_abeek):
+            range_str = req_doc.get("applied_year_range", "필드없음")
+            print(f"  [{i+1}번 문서] 범위: '{range_str}'")
+            
             try:
-                year_numbers = re.findall(r'\d+', range_str)
-                if len(year_numbers) == 1: 
-                    range_start_year = int(year_numbers[0])
-                elif len(year_numbers) == 2: 
-                    range_start_year = int(year_numbers[0])
-                    range_end_year = int(year_numbers[1])
+                year_numbers = re.findall(r'\d+', str(range_str))
+                if not year_numbers:
+                    print("    -> ⚠️ 숫자 추출 실패")
+                    continue
+
+                range_start = int(year_numbers[0])
+                # 숫자가 1개면(예: 2025~) 끝은 무한대, 2개면(예: 2018~2022) 두번째 숫자
+                range_end = int(year_numbers[1]) if len(year_numbers) > 1 else float('inf')
                 
-                is_match = (range_start_year <= search_year) and (search_year <= range_end_year)
+                # 비교 로직
+                is_match = (range_start <= search_year <= range_end)
                 
+                print(f"    -> 파싱: {range_start} ~ {range_end}")
+                print(f"    -> 비교: {range_start} <= {search_year} <= {range_end} ? 결과: {is_match}")
+
                 if is_match:
                     result = req_doc
+                    print("    -> 🎉 정답 문서를 찾았습니다!")
                     break 
-            except Exception as e: # <--- 'except Exception:' -> 'except Exception as e:'
-                print(f"!!!!!!!!!!!!!! 범위 매칭 중 오류 발생 !!!!!!!!!!!!!!")
-                print(f"    -> 입력 학번: {search_year}, 범위 문자열: '{range_str}'")
-                print(f"    -> 오류 내용: {e}")
-                traceback.print_exc() # 상세 오류 스택 출력
-                continue # 다음 루프로 넘어감
+            except Exception as e:
+                print(f"    -> ❌ 에러 발생: {e}")
+                continue
             
         # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
@@ -299,18 +316,16 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
             # ▲▲▲ [수정 완료] ▲▲▲
             return context
         else:
-            fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다."
-            return fail_msg
+            print("[5. 결과] 매칭되는 문서를 찾지 못했습니다.")
+            return f"{student_id_prefix}학번({search_year}), ABEEK {abeek_bool} 조건에 맞는 범위를 찾을 수 없습니다."
             
     except Exception as e:
-        print(f"!!!!!!!!!!!!!! MongoDB 졸업 요건 검색 중 치명적 오류 발생 !!!!!!!!!!!!!!")
-        import traceback
+        print(f"!!!!!!!!!!!!!! 치명적 오류 !!!!!!!!!!!!!!")
         traceback.print_exc()
-        return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."
+        return "오류가 발생했습니다."
 
-import re 
-import traceback    
-@tool
+ 
+@tool  
 def search_curriculum_subjects(student_id_prefix: str, abeek_bool: bool, grade: int = None, semester: int = None, subject_type: str = None) -> str:
     """
     "교과과정", "개설 과목", "필수 이수 과목", "1학년 과목", "전공 필수" 등 
