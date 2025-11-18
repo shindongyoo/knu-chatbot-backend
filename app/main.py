@@ -18,6 +18,8 @@ from langchain.agents import AgentExecutor, create_openai_functions_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 
+from langchain_openai import ChatOpenAI
+
 load_dotenv()
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from app.database import chatbot_db, r
@@ -123,6 +125,8 @@ agent_prompt = ChatPromptTemplate.from_messages([
     ("user", "{input}"), # 사용자의 새 질문
     MessagesPlaceholder(variable_name="agent_scratchpad"), # AI의 '생각'이 들어올 자리
 ])
+
+llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
 # --- [에이전트 실행기 생성] ---
 agent = create_openai_functions_agent(client, tools, agent_prompt)
