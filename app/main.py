@@ -129,9 +129,9 @@ agent_prompt = ChatPromptTemplate.from_messages([
 llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
 # --- [에이전트 실행기 생성] ---
-agent = create_openai_functions_agent(client, tools, agent_prompt)
+agent = create_openai_functions_agent(llm, tools, agent_prompt) # <--- llm (정상)
 agent_executor = AgentExecutor(
-    agent=agent, 
+    agent=agent,
     tools=tools, 
     verbose=True, # AI의 '생각' 과정을 터미널에 출력 (매우 중요!)
     handle_parsing_errors=True # AI가 실수해도 멈추지 않게 함
