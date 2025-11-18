@@ -9,6 +9,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from app.database import chatbot_db
+from langchain.tools import tool # <-- [새로 추가] AI 도구 import
 
 load_dotenv()
 
@@ -122,95 +123,71 @@ def search_members_in_mongodb(query: str):
     return None
 
 # --- 3. 메인 검색 함수 (라우터 로직 통합) ---
+@tool
+def search_similar_documents(query: str, top_k: int = 3) -> str:
+    """
+    "수강신청", "장학생", "취업 정보", "교수님 정보" 등 
+    '졸업 요건'을 제외한 모든 일반적인 교내 정보를 검색할 때 사용합니다.
+    (예: "장학생 관련정보 알려줘", "한세경 교수님 이메일 알려줘")
+    """
+    print(f"\n--- [에이전트 도구 1: 일반 검색] '{query}' 검색 시작 ---")
+    member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
+    job_keywords = ["취업", "인턴", "채용", "회사", "직무"]
 
-def search_similar_documents(query: str, top_k: int = 3): # top_k=3으로 재설정 (진단용)
-    print(f"\n--- [심층 진단] '{query}' 검색 시작 (상위 {top_k}개 요청) ---")
-    member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님", "사무실", "위치", "호관", "호실"]
-    job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
-
-    # --- 교수님 질문 처리 (MongoDB) ---
+    # (MongoDB 라우팅 로직은 그대로 유지)
     if any(keyword in query for keyword in member_keywords):
         print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 검색 시도")
         mongo_context = search_members_in_mongodb(query)
         if mongo_context:
-            print(f"--- [심층 진단] MongoDB 결과 반환 ---")
-            return mongo_context, ['name', 'position', 'lab', 'email', 'phone']
+            return mongo_context
         else:
-             print(f"[🔍 DB 라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
+            print(f"[🔍 DB 라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
     
-    # --- Vector DB 검색 ---
+    # (Vector DB 검색 로직은 그대로 유지)
     selected_dbs = None
-    db_type = ""
     if any(keyword in query for keyword in job_keywords):
-        print("[진단] 취업 DB 선택")
         selected_dbs = (jobs_db,)
-        db_type = "Jobs"
     else:
-        print("[진단] 공지사항 DB (제목+본문) 선택")
         selected_dbs = (notices_title_db, notices_content_db)
-        db_type = "Notices(Title+Content)"
     
     if not any(db for db in selected_dbs if db is not None):
-        return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패).", []
+        return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패)."
 
     all_results_with_scores = []
-    print(f"--- [심층 진단] {db_type} DB에서 유사도 검색 실행 ---")
-    for i, db in enumerate(selected_dbs):
+    for db in selected_dbs:
         if db:
-            # similarity_search_with_score는 (Document, score) 튜플 리스트 반환
-            results = db.similarity_search_with_score(query, k=top_k) 
-            print(f"  [DB {i+1}] 검색 완료: {len(results)}개 결과 찾음")
-            for doc, score in results:
-                print(f"    - 점수: {score:.4f}, 내용: {doc.page_content[:100]}...") # 점수와 내용 일부 출력
+            results = db.similarity_search_with_score(query, k=top_k)
             all_results_with_scores.extend(results)
 
-    # --- 중복 제거 및 최종 선택 ---
+    # (중복 제거 및 정렬 로직은 그대로 유지)
     unique_results = {}
     for doc, score in all_results_with_scores:
-        # 내용이 같으면 점수(거리)가 더 낮은 (더 유사한) 것으로 갱신
         if doc.page_content not in unique_results or score < unique_results[doc.page_content][1]:
             unique_results[doc.page_content] = (doc, score)
-
-    # 점수(score) 기준으로 오름차순 정렬 (점수가 낮을수록 유사함)
     sorted_results = sorted(unique_results.values(), key=lambda item: item[1])
-    print(f"--- [심층 진단] 중복 제거 및 정렬 후 {len(sorted_results)}개 결과:")
-    for i, (doc, score) in enumerate(sorted_results):
-         print(f"  [최종 순위 {i+1}] 점수: {score:.4f}, 내용: {doc.page_content[:100]}...")
 
-    # 최종 Context 생성 (상위 top_k개 사용)
+    # (Context 생성 로직은 그대로 유지)
     context = ""
-    field_names = set()
-    print(f"--- [심층 진단] 상위 {top_k}개를 최종 Context로 사용 ---")
     for doc, score in sorted_results[:top_k]:
-        context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n" # 점수 포함
-        field_names.update(doc.metadata.keys())
+        context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n"
 
     if not context:
-        print("!!!!!!!!!!!!!! [심층 진단] 최종 컨텍스트가 비어있음 !!!!!!!!!!!!!!")
+        return "검색된 참고 자료가 없습니다."
     else:
-        print(f"--- [심층 진단] 최종 컨텍스트 생성 완료 ---")
+        return context
 
-    return context, list(field_names)
-
-
-
-# app/search_engine.py의 get_graduation_info 함수 전체를 이걸로 교체
-
-
-import re 
-import traceback # <-- 상세 오류 추적을 위해 import 추가
-
-def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
+@tool
+def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
     """
-    MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (루프 내 오류 로깅 추가)
+    '졸업 요건'에 대한 질문에 "최종적으로" 답할 때 사용합니다. 
+    반드시 사용자의 'student_id_prefix'(예: "20")와 'abeek_bool'(True/False)을 
+    먼저 알아낸 후에만 이 도구를 호출해야 합니다.
     """
-    print("--- [get_graduation_info] 함수 시작 ---")
+    print(f"\n--- [에이전트 도구 2: 졸업요건 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool} ---")
     try:
-        collection = chatbot_db["graduation_requirements2"] 
-        print(f"--- [get_graduation_info] 컬렉션 '{collection.name}' 선택 완료 ---")
+        collection = chatbot_db["graduation_requirements"] 
         
-        # --- [1. 학번 변환 로직] ---
+        # (학번 변환 로직은 그대로 유지)
         search_year = -1 
         try:
             year_prefix_num = int(student_id_prefix)
@@ -218,28 +195,17 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 search_year = 2000 + year_prefix_num 
             else:
                 search_year = year_prefix_num
-            print(f"[학번 변환] 입력 '{student_id_prefix}' -> 검색 연도 '{search_year}'")
         except ValueError:
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
         
-        # --- [2. MongoDB 쿼리] ---
+        # (학번 범위 검색 로직은 그대로 유지)
         query = { "abeek": abeek_bool }
-        print(f"--- [MongoDB] 쿼리 실행 직전: {query} ---")
         all_reqs_for_abeek = list(collection.find(query))
-        print(f"--- [MongoDB] 쿼리 실행 완료: {len(all_reqs_for_abeek)}개 찾음 ---")
-        
         result = None 
         
-        # --- [3. 학번 범위 매칭 루프] ---
-        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
-        for i, req_doc in enumerate(all_reqs_for_abeek):
+        for req_doc in all_reqs_for_abeek:
             range_str = req_doc.get("applied_year_range", "") 
-            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
-            
-            range_start_year = -1
-            range_end_year = float('inf') 
-            
-            # ▼▼▼ [핵심 수정] ▼▼▼
+            start_year, end_year = -1, float('inf') 
             try:
                 year_numbers = re.findall(r'\d+', range_str)
                 if len(year_numbers) == 1: 
@@ -248,24 +214,13 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                     range_start_year = int(year_numbers[0])
                     range_end_year = int(year_numbers[1])
                 
-                is_after_start = (range_start_year <= search_year)
-                is_before_end = (search_year <= range_end_year)
-                is_match = is_after_start and is_before_end
+                is_match = (range_start_year <= search_year) and (search_year <= range_end_year)
                 
-                print(f"    -> 파싱: {range_start_year}~{range_end_year} / 비교: ({is_after_start} AND {is_before_end}) = {is_match}") # 로그 추가
-
                 if is_match:
                     result = req_doc
-                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
                     break 
-                else:
-                    print(f"    -> ❌ 매칭 실패.")
-
-            except Exception as e: 
-                print(f"!!!!!!!!!!!!!! [루프 {i+1}] 범위 매칭 중 오류 발생 !!!!!!!!!!!!!!")
-                print(f"    -> 오류 내용: {e}")
-                traceback.print_exc() # 상세 오류 스택 출력
-                continue # 다음 루프로 넘어감
+            except Exception:
+                continue
             
         # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
