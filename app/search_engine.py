@@ -324,18 +324,24 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
         traceback.print_exc()
         return "오류가 발생했습니다."
 
- 
+
 @tool
 def search_curriculum_subjects(student_id_prefix: str, abeek_bool: bool, grade: int = None, semester: int = None, subject_type: str = None, module: str = None) -> str:
     """
-    "교과과정", "개설 과목", "1학년 과목", "전공 필수", "전력전자 관련 과목" 등 
-    "수업 목록" 자체가 궁금할 때 사용합니다.
-    학번(student_id_prefix)과 ABEEK(abeek_bool) 정보가 필요합니다.
-    학년(grade), 학기(semester), 과목 구분(subject_type), 모듈(module)로 필터링할 수 있습니다.
+    [설명서] 이 도구는 '교과과정', '개설 과목', '수업 목록'을 검색할 때 사용합니다.
+    학번(student_id_prefix)과 ABEEK(abeek_bool) 정보가 필수입니다.
+    
+    [필터링 옵션]
+    - grade (int): 학년 (1, 2, 3, 4)
+    - semester (int): 학기 (1, 2)
+    - subject_type (str): 과목 구분 (예: "전공기반", "공학전공", "기본소양")
+    - module (str): **중요** 사용자가 "스마트 계통", "전력전자" 등 특정 분야/모듈을 언급하면 이 파라미터에 입력하세요.
     """
     print(f"\n--- [에이전트 도구 3: 교과과정 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool}, 모듈: {module} ---")
     try:
-        collection = chatbot_db["curriculum"] 
+        # ▼▼▼ [수정 1] 컬렉션 이름을 데이터가 있는 곳으로 변경 ▼▼▼
+        collection = chatbot_db["graduation_requirements"] 
+        # ▲▲▲ [수정 완료] ▲▲▲
         
         # (학번 변환 로직 - 기존과 동일)
         search_year = -1 
@@ -366,30 +372,30 @@ def search_curriculum_subjects(student_id_prefix: str, abeek_bool: bool, grade: 
             return f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'}에 대한 '교과과정' 문서를 찾지 못했습니다."
         
         # --- [과목 필터링] ---
-        subjects = result_doc.get('curriculum', {}).get('subjects', [])
+        # ▼▼▼ [수정 2] curriculum 객체 안에서 subjects 가져오기 ▼▼▼
+        # 데이터 구조: document -> curriculum -> subjects
+        curriculum_data = result_doc.get('curriculum', {})
+        if not curriculum_data:
+             return "해당 학번의 문서에 'curriculum' 데이터가 없습니다."
+             
+        subjects = curriculum_data.get('subjects', [])
+        # ▲▲▲ [수정 완료] ▲▲▲
+        
         if not subjects:
             return "교과과정 문서를 찾았으나, 과목(subjects) 리스트가 비어있습니다."
 
         filtered_subjects = subjects
         
-        # 1. 학년 필터링
+        # 필터링 로직 (학년, 학기, 구분, 모듈)
         if grade:
             filtered_subjects = [s for s in filtered_subjects if s.get('grade') == grade]
-        
-        # 2. 학기 필터링
         if semester:
             filtered_subjects = [s for s in filtered_subjects if s.get('semester') == semester]
-        
-        # 3. 구분(type) 필터링 (예: 전공기반, 공학전공)
         if subject_type:
             filtered_subjects = [s for s in filtered_subjects if subject_type in s.get('type', '')]
-
-        # ▼▼▼ [추가된 기능] 4. 모듈(module) 필터링 ▼▼▼
         if module:
             print(f"    -> 필터링: '모듈'에 '{module}' 포함")
-            # 모듈명이 정확히 일치하거나 포함되는 과목만 선택
             filtered_subjects = [s for s in filtered_subjects if module in s.get('module', '')]
-        # ▲▲▲ [추가 완료] ▲▲▲
             
         if not filtered_subjects:
             conditions = []
@@ -400,13 +406,12 @@ def search_curriculum_subjects(student_id_prefix: str, abeek_bool: bool, grade: 
             condition_str = ", ".join(conditions)
             return f"조건({condition_str})에 맞는 과목을 찾지 못했습니다."
             
-        # 5. 결과 포맷팅
+        # 결과 포맷팅
         context = f"[검색된 교과과정 ({student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'})]\n"
         context += f"- 적용 학번: {result_doc.get('applied_year_range', 'N/A')}\n"
         context += f"- 검색된 과목 수: {len(filtered_subjects)}\n\n"
         
-        for i, sub in enumerate(filtered_subjects[:30]): # 최대 30개
-            # 모듈 정보도 함께 출력
+        for i, sub in enumerate(filtered_subjects[:30]): 
             module_info = f", 모듈: {sub.get('module')}" if sub.get('module') else ""
             context += f"  - {sub.get('course_name')} (학년:{sub.get('grade')}/학기:{sub.get('semester')}, 구분:{sub.get('type')}{module_info}, 학점:{sub.get('credits')})\n"
         
