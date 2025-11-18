@@ -176,6 +176,8 @@ def search_similar_documents(query: str, top_k: int = 3) -> str:
     else:
         return context
 
+import re 
+import traceback
 @tool
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
     """
@@ -305,7 +307,9 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
         import traceback
         traceback.print_exc()
         return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."
-    
+
+import re 
+import traceback    
 @tool
 def search_curriculum_subjects(student_id_prefix: str, abeek_bool: bool, grade: int = None, semester: int = None, subject_type: str = None) -> str:
     """
