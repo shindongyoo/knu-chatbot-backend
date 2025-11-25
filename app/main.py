@@ -46,8 +46,6 @@ class QuestionRequest(BaseModel):
     session_id: str
     question: str
 
-# app/main.py 파일에 추가
-
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -67,13 +65,12 @@ async def upload_file(
         if file.content_type.startswith("image/"):
             try:
                 image = Image.open(io.BytesIO(contents))
-                # 한국어(kor)와 영어(eng)를 모두 인식하도록 설정
-                # (주의: 서버에 tesseract-ocr 데이터가 설치되어 있어야 함)
+                # Tesseract가 설치되어 있어야 작동합니다. (영어+한글)
                 extracted_text = pytesseract.image_to_string(image, lang='kor+eng')
                 print("    -> 이미지 OCR 완료")
             except Exception as e:
                 print(f"    -> 이미지 처리 실패: {e}")
-                return JSONResponse(content={"error": "이미지 처리 중 오류가 발생했습니다."}, status_code=500)
+                return JSONResponse(content={"error": "이미지 처리 중 오류가 발생했습니다. (Tesseract 설치 확인 필요)"}, status_code=500)
 
         # 2. PDF 처리
         elif file.content_type == "application/pdf":
@@ -89,21 +86,18 @@ async def upload_file(
                 return JSONResponse(content={"error": "PDF 처리 중 오류가 발생했습니다."}, status_code=500)
 
         else:
-            return JSONResponse(content={"error": "지원하지 않는 파일 형식입니다. (이미지 또는 PDF만 가능)"}, status_code=400)
+            return JSONResponse(content={"error": "지원하지 않는 파일 형식입니다."}, status_code=400)
 
-        # 3. 텍스트 후처리
+        # 3. 텍스트 후처리 및 저장
         extracted_text = extracted_text.strip()
         if not extracted_text:
-            extracted_text = "(파일에서 텍스트를 추출할 수 없습니다. 이미지가 깨졌거나 텍스트가 없는 스캔본일 수 있습니다.)"
+            extracted_text = "(파일에서 텍스트를 추출할 수 없습니다.)"
 
-        # 4. ★중요★ 추출된 텍스트를 '사용자가 보낸 메시지'로 간주하고 Redis에 저장
-        # 이렇게 해야 AI 에이전트가 이전 대화 기록(history)을 볼 때 파일 내용을 알 수 있습니다.
-        user_message = f"[파일 업로드: {file.filename}]\n{extracted_text}"
-        ai_ack_message = f"파일 '{file.filename}'을 업로드하셨군요. 내용을 확인했습니다."
+        # ★ 핵심: 추출된 텍스트를 '사용자가 보낸 메시지'처럼 저장하여 AI가 읽을 수 있게 함
+        user_message_for_history = f"[사용자가 파일을 업로드함: {file.filename}]\n[파일 내용 시작]\n{extracted_text}\n[파일 내용 끝]"
+        ai_ack_message = f"파일 '{file.filename}'을 확인했습니다. 내용에 대해 질문해 주세요."
         
-        save_chat_history(user_id, session_id, user_message, ai_ack_message)
-
-        print(f"--- [파일 업로드] 완료. 추출 텍스트 길이: {len(extracted_text)}자 ---")
+        save_chat_history(user_id, session_id, user_message_for_history, ai_ack_message)
 
         return {
             "filename": file.filename,
@@ -112,9 +106,8 @@ async def upload_file(
         }
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JSONResponse(content={"error": f"업로드 처리 중 오류: {e}"}, status_code=500)
+        print(f"업로드 중 오류: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 def get_recent_history(session_id: str, n=5) -> list[dict]: # n=3 -> n=5 (조절 가능)
     """
