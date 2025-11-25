@@ -329,45 +329,27 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
 def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool = None, grade: int = None, semester: int = None, subject_type: str = None, module: str = None) -> str:
     """
     [설명서] '교과과정', '개설 과목', '수업 목록'을 검색합니다.
-    학번(student_id_prefix)과 ABEEK(abeek_bool)이 필요합니다.
-    
-    [특수 규칙]
-    사용자가 "스마트 계통", "전력전자" 등 특정 '모듈' 과목을 물어본다면,
-    학번/ABEEK 정보 없이(None) 모듈명만으로 전체 DB를 검색합니다.
+    [중요] 사용자가 '모듈'(예: 스마트계통, 전력전자)을 물어보면 다른 인자 없이 module만 입력해도 됩니다.
     """
-    print(f"\n--- [에이전트 도구 3: 교과과정 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool}, 모듈: {module} ---")
+    print(f"\n--- [도구 실행] 교과과정 검색 (모듈: {module}) ---")
     
     try:
-        # 1. 컬렉션 이름 확인 (졸업요건과 같은 컬렉션 사용)
-        collection = chatbot_db["graduation_requirements"] 
+        collection = chatbot_db["graduation_requirements2"] 
         
         target_docs = []
 
-        # --- [A. 모듈 검색 (학번 무시)] ---
-        if module and student_id_prefix is None:
-            print("    -> 모듈 검색 모드. 전체 문서에서 검색합니다.")
-            # abeek 조건만 맞추거나, 전체 검색
-            query = {} if abeek_bool is None else {"abeek": abeek_bool}
-            target_docs = list(collection.find(query))
-            print(f"    -> 검색 대상 문서 수: {len(target_docs)}개") # 디버깅용 로그 추가
-
-        # --- [B. 일반 검색 (학번 필수)] ---
-        else:
-            search_year = -1
-            try:
-                if student_id_prefix:
-                    year_prefix_num = int(student_id_prefix)
-                    if 0 <= year_prefix_num <= 99: search_year = 2000 + year_prefix_num
-                    else: search_year = year_prefix_num
-            except ValueError:
-                return "학번 형식이 올바르지 않습니다."
-            
-            query = {}
-            if abeek_bool is not None: query["abeek"] = abeek_bool
-            
+        # 1. 문서 확보 전략
+        if module:
+            print("    -> 모듈 검색 모드: 전체 문서 스캔")
+            # 모듈 검색은 학번/ABEEK 무시하고 전체 문서 스캔
+            target_docs = list(collection.find({}))
+        
+        elif student_id_prefix:
+            # 학번 검색 모드
+            search_year = 2000 + int(student_id_prefix) if int(student_id_prefix) < 100 else int(student_id_prefix)
+            query = {"abeek": abeek_bool} if abeek_bool is not None else {}
             all_docs = list(collection.find(query))
             
-            # 학번 범위 매칭
             for doc in all_docs:
                 range_str = doc.get("applied_year_range", "")
                 try:
@@ -381,60 +363,51 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
                 except: continue
 
         if not target_docs:
-            return "조건에 맞는 교과과정 문서를 찾을 수 없습니다."
+            # 안전장치: 혹시 모르니 그냥 다 가져와봄 (데이터가 적으므로 가능)
+            target_docs = list(collection.find({}))
 
-        # --- [과목 수집 및 필터링] ---
-        all_found_subjects = []
-        seen_courses = set() 
+        # 2. 과목 필터링
+        results = []
+        search_module = module.replace(" ", "") if module else ""
 
-        print(f"--- [디버깅] 문서 {len(target_docs)}개에서 과목 검색 시작 ---")
-        
+        print(f"--- [디버깅] 문서 {len(target_docs)}개 내부 탐색 시작 ---")
+
         for doc in target_docs:
-            # ▼▼▼ 스키마 반영: doc['curriculum']['subjects'] ▼▼▼
-            curriculum_data = doc.get('curriculum', {})
-            if not curriculum_data: continue
-            subjects = curriculum_data.get('subjects', [])
+            # ▼▼▼ [핵심 수정] 데이터 위치 자동 탐색 ▼▼▼
+            # 1순위: 최상위에 curriculum이 있는 경우
+            curriculum = doc.get('curriculum', {})
+            subjects = curriculum.get('subjects', [])
+            
+            # 2순위: requirements 안에 curriculum이 있는 경우 (지금 님의 DB 상황!)
+            if not subjects:
+                requirements = doc.get('requirements', {})
+                curriculum = requirements.get('curriculum', {})
+                subjects = curriculum.get('subjects', [])
+            # ▲▲▲ [수정 완료] ▲▲▲
             
             for sub in subjects:
-                # 1. 모듈 필터링 (부분 일치 허용)
+                # 모듈 체크
                 if module:
-                    sub_module = sub.get('module', '')
-                    if not sub_module or module not in sub_module:
-                        continue
-                
-                # 2. 학년/학기/구분 필터링
+                    sub_module = sub.get('module', '').replace(" ", "")
+                    if search_module not in sub_module:
+                        continue 
+
+                # 나머지 필터
                 if grade and sub.get('grade') != grade: continue
                 if semester and sub.get('semester') != semester: continue
-                if subject_type and subject_type not in sub.get('type', ''): continue
+                
+                # 결과 포맷팅
+                mod_info = f" [모듈: {sub.get('module')}]" if sub.get('module') else ""
+                info = f"- {sub.get('course_name')} (학년: {sub.get('grade')}, 구분: {sub.get('type')}){mod_info}"
+                
+                if info not in results:
+                    results.append(info)
 
-                # 중복 제거
-                course_name = sub.get('course_name', '').strip()
-                if course_name not in seen_courses:
-                    seen_courses.add(course_name)
-                    all_found_subjects.append(sub)
+        if not results:
+            return f"조건(모듈: {module})에 맞는 과목을 찾을 수 없습니다. DB 구조를 확인해주세요."
 
-        if not all_found_subjects:
-            return f"조건(모듈: {module}, 학년: {grade})에 맞는 과목이 없습니다."
-
-        # --- [결과 포맷팅] ---
-        context = f"[검색 결과] "
-        if module: context += f"모듈: '{module}' 관련 과목 목록\n"
-        else: context += "교과과정 목록\n"
-        
-        if student_id_prefix:
-             context += f"- 대상: {student_id_prefix}학번 (ABEEK {'O' if abeek_bool else 'X'})\n"
-        else:
-             context += "- 대상: 전체 학번 통합 검색\n"
-        
-        context += f"- 검색된 과목 수: {len(all_found_subjects)}개\n\n"
-
-        for sub in all_found_subjects[:30]: 
-            mod_str = f", 모듈: {sub.get('module')}" if sub.get('module') else ""
-            context += f"  - {sub.get('course_name')} (학년: {sub.get('grade')}, 구분: {sub.get('type')}{mod_str})\n"
-
-        return context
+        return f"[검색 결과] 총 {len(results)}개 과목 발견:\n" + "\n".join(results[:30])
 
     except Exception as e:
-        print(f"오류 발생: {e}")
         traceback.print_exc()
-        return "검색 중 오류가 발생했습니다."
+        return "검색 중 오류 발생"
