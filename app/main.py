@@ -1,3 +1,5 @@
+AI-main
+
 # app/main.py
 import os
 import json
@@ -12,15 +14,23 @@ from pydantic import BaseModel
 from PyPDF2 import PdfReader
 from PIL import Image
 from dotenv import load_dotenv
-load_dotenv() # .env 파일을 여기서 먼저 로드합니다.
-# --- 서비스 초기화 ---
-# OpenAI 클라이언트 초기화 (최신 v1.x 방식)
+import traceback # 오류 로깅
+
+from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+
+from langchain_openai import ChatOpenAI
+
+load_dotenv()
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-# ▼▼▼ [수정] database.py에서 DB 객체들을 import 합니다. ▼▼▼
 from app.database import chatbot_db, r
-# ▼▼▼ [수정] DB 초기화가 끝난 후에 search_engine을 import 합니다. ▼▼▼
-from app.search_engine import search_similar_documents
-from app.search_engine import get_graduation_info
+
+# --- [핵심 수정: 함수들을 '도구'로 import] ---
+from app.search_engine import search_similar_documents, get_graduation_info, search_curriculum_subjects
+tools = [search_similar_documents, get_graduation_info, search_curriculum_subjects]
+# ----------------------------------------
+# ----------------------------------------
 
 # FastAPI 앱 설정
 app = FastAPI()
@@ -86,24 +96,56 @@ def save_chat_history(user_id: str, session_id: str, question: str, answer: str)
 def root():
     return {"message": "KNU Chatbot backend is running"}
 
-def transform_query(question: str) -> list[str]:
-    """AI를 사용해 사용자의 애매한 질문을 구체적인 검색어로 변환합니다."""
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "당신은 사용자의 질문 1개를 Vector DB에서 검색하기 좋은 구체적인 검색어 3개로 바꾸는 쿼리 변환 전문가입니다. 각 검색어는 쉼표(,)로 구분해서 응답하세요."},
-                {"role": "user", "content": f"다음 질문을 검색어로 바꿔줘: {question}"}
-            ],
-            temperature=0
-        )
-        transformed_queries = response.choices[0].message.content.strip()
-        queries = [q.strip() for q in transformed_queries.split(',')][:3] # 최대 3개
-        print(f"[쿼리 변환] 원본: '{question}' -> 변환: {queries}")
-        return queries
-    except Exception as e:
-        print(f"쿼리 변환 실패: {e}")
-        return [question] # 실패하면 원래 질문으로 검색
+AGENT_SYSTEM_PROMPT = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다.
+당신은 스스로 '생각'하고, '계획'을 세우며, '도구'를 사용하여 답변을 찾습니다.
+
+[당신이 사용 가능한 도구]
+1. `search_similar_documents`: "수강신청", "장학생", "교수님" 등 '졸업 요건'이나 '교과과정'을 제외한 모든 일반 정보를 검색합니다.
+2. `get_graduation_info`: '졸업 학점', '요건' 등 졸업에 필요한 요약 정보를 검색합니다. (학번 필수)
+3. `search_curriculum_subjects`: '교과과정', '개설 과목', '모듈' 관련 정보를 검색합니다.
+
+[행동 지침 및 우선순위]
+
+1. **[모듈/분야 과목 질문 (최우선 규칙)]**
+   - 사용자가 "스마트 계통 과목 추천해줘", "전력전자 관련 수업 뭐 있어?", "전자기응용 분야 과목 알려줘" 처럼 **특정 모듈/분야**를 언급하면, **학번을 절대 묻지 마세요.**
+   - 행동: 즉시 `search_curriculum_subjects(module="스마트 계통")` 처럼 도구를 바로 실행하세요. (`student_id_prefix`는 None으로 둡니다.)
+
+2. **[개인 맞춤 졸업요건 및 시간표]**
+   - 사용자가 "나 졸업하려면 뭐 들어야 돼?", "졸업 학점 얼마야?", "1학년 필수 과목 알려줘" 처럼 **개인적인 졸업 요건이나 학년별 커리큘럼**을 물어볼 때는 **학번과 ABEEK 정보가 필수**입니다.
+   - 행동: 만약 정보가 없다면, 도구를 쓰지 말고 **"정확한 정보를 위해 학번(예: 20)과 ABEEK 이수 여부(O/X)를 '20/O' 형식으로 입력해주세요."**라고 되물으세요.
+   - 정보가 확보되면 `get_graduation_info` 또는 `search_curriculum_subjects`를 사용하세요.
+
+3. **[과목 비교/추론]**
+   - 사용자가 "제가 A, B 과목을 들었는데, 뭘 더 들어야 하나요?"라고 질문하면:
+     1) '학번/ABEEK'을 확보하여 `search_curriculum_subjects` 도구로 해당 학년의 **전체 필수 과목**을 조회합니다.
+     2) 조회된 리스트와 사용자가 '들은 과목(A, B)'을 **스스로 비교**하여 '안 들은 과목'을 찾아내 답변합니다.
+
+4. **[일반 질문]**
+   - "장학생", "수강신청", "한세경 교수님" 등 그 외 질문은 `search_similar_documents` 도구를 사용하세요.
+   - 도구 검색 결과가 질문과 관련 없으면(예: "장학생" 질문에 "선거일" 응답), "죄송합니다, 관련 정보를 찾지 못했습니다."라고 답변하세요.
+
+5. **[맥락 파악 및 잡담]**
+   - '이전 대화 기록'을 확인하여 "그럼 이메일은?" 같은 후속 질문을 자연스럽게 처리하세요.
+   - "안녕?" 같은 단순 대화는 도구 없이 친절하게 대답하세요.
+"""
+
+agent_prompt = ChatPromptTemplate.from_messages([
+    ("system", AGENT_SYSTEM_PROMPT),
+    MessagesPlaceholder(variable_name="chat_history"), # 대화 기록이 들어올 자리
+    ("user", "{input}"), # 사용자의 새 질문
+    MessagesPlaceholder(variable_name="agent_scratchpad"), # AI의 '생각'이 들어올 자리
+])
+
+llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+
+# --- [에이전트 실행기 생성] ---
+agent = create_openai_functions_agent(llm, tools, agent_prompt) # <--- llm (정상)
+agent_executor = AgentExecutor(
+    agent=agent,
+    tools=tools, 
+    verbose=True, # AI의 '생각' 과정을 터미널에 출력 (매우 중요!)
+    handle_parsing_errors=True # AI가 실수해도 멈추지 않게 함
+)
 
 
 @app.post("/stream")
@@ -112,238 +154,69 @@ def stream_answer(req: QuestionRequest):
     session_id = req.session_id
     user_id = req.user_id
 
-    
-
     def event_generator():
         try:
-            state_key = f"state:{session_id}"
-            current_state = r.get(state_key)
+            # --- [수정] 모든 if문, 상태 관리 로직 삭제 ---
+            print(f"[Agent Handling] '{question}'")
+            
+            # 1. 이전 대화 기록 불러오기 (API 형식)
+            history_messages = get_recent_history(session_id, n=5)
+            
+            # 2. 에이전트 스트리밍 실행
+            response_stream = agent_executor.stream({
+                "input": question,
+                "chat_history": history_messages
+            })
+            
+            collected_answer = ""
+            for chunk in response_stream:
+                # agent.stream()은 'output' 키로 최종 답변 조각을 줍니다.
+                if "output" in chunk:
+                    delta = chunk["output"]
+                    collected_answer += delta
+                    yield f"data: {json.dumps({'text': delta})}\n\n"
+                elif "steps" in chunk:
+                    # AI가 어떤 '도구'를 '왜' 쓰는지 로그로 확인
+                    print(f"[Agent Step] {chunk['steps']}") 
 
-            # --- [유지] 1. '졸업요건' 2단계 처리 ---
-            if current_state == "awaiting_grad_info":
-                print(f"[상태 감지] 'awaiting_grad_info' 상태입니다. 입력: {question}")
-                try:
-                    student_id, abeek_status_input = question.strip().split('/')
-                    abeek_bool_value = True if abeek_status_input.upper() == 'O' else False
-                    print(f"[정보 파싱] 학번: {student_id}, ABEEK(쿼리용): {abeek_bool_value}")
-                
-                except Exception as e:
-                    error_text = '입력 형식이 잘못되었습니다. 학번(예: 18)과 ABEEK 이수 여부(O/X)를 \'18/O\' 형식으로 다시 입력해주세요.'
-                    yield f"data: {json.dumps({'text': error_text})}\n\n"
-                    return
-
-                context = get_graduation_info(student_id, abeek_bool_value)
-                r.delete(state_key) # 상태 초기화
-
-                system_prompt = "당신은 경북대학교 졸업 요건 안내 전문가입니다. 오직 '검색된 졸업 요건' 자료에만 근거하여 사용자에게 맞춤형 졸업 정보를 안내하세요."
-                user_prompt = f"""
-                ### 검색된 졸업 요건:
-                {context if context else "일치하는 졸업 요건을 찾지 못했습니다."}
-                ### 사용자의 질문 (요약):
-                {student_id}학번, ABEEK {abeek_status_input} 학생의 졸업 요건
-                ### 답변:
-                """
-                
-                stream = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    stream=True, temperature=0.2
-                )
-                
-                collected_answer = ""
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content or ""
-                    if delta:
-                        collected_answer += delta
-                        yield f"data: {json.dumps({'text': delta})}\n\n"
-                
-                save_chat_history(user_id, session_id, "졸업 요건 질문", collected_answer)
-                return # 작업 완료
-
-            # --- [유지] 2. '졸업요건' 1단계 의도 감지 ---
-            if "졸업요건" in question or "졸업 요건" in question:
-                print(f"[의도 감지] '졸업요건' 질문을 감지했습니다.")
-                r.set(state_key, "awaiting_grad_info", ex=300) 
-                follow_up_question = "졸업 요건을 확인하기 위해, 학번(예: 18, 19, 20...)과 ABEEK 이수 여부(O/X)를 **'18/O'** 형식으로 입력해주세요."
-                yield f"data: {json.dumps({'text': follow_up_question})}\n\n"
-                return # 작업 완료
-
-            # --- [핵심 수정] 3. '일반 질문' 처리 ---
-            else:
-                print(f"[일반 질문] '{question}'에 대한 RAG 절차를 시작합니다.")
-                
-                # 1. [통합] API가 이해하는 'list[dict]' 형태로 대화 기록을 "한 번만" 불러옵니다.
-                history_messages = get_recent_history(session_id, n=5)
-                
-                # 1. search_engine에서 교수님 키워드 리스트를 가져옵니다. (가져올 수 없다면 직접 정의)
-                member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
-                context = None
-                
-                if any(keyword in question for keyword in member_keywords):
-                    # 1-A. 교수님 질문이면, search_similar_documents를 "딱 한 번만" 호출합니다.
-                    print("[라우팅] 교수님 질문으로 판단. MongoDB 검색 시도.")
-                    context, _ = search_similar_documents(question)
-                
-                else:
-                    # 1-B. 교수님 질문이 "아닌" 경우에만 "질문 해석 AI"를 사용합니다.
-                    print("[라우팅] 일반 질문으로 판단. AI 쿼리 변환 시작.")
-                    search_queries = transform_query(question)
-                    all_contexts = []
-                    for q in search_queries:
-                        context_part, _ = search_similar_documents(q)
-                        if context_part:
-                            all_contexts.append(context_part)
-                    context = "\n---\n".join(all_contexts)
-                    
-              
-                MAX_CONTEXT_LENGTH = 7000
-                if len(context) > MAX_CONTEXT_LENGTH:
-                    context = context[:MAX_CONTEXT_LENGTH]
-
-                # ▼▼▼ [수정된 system_prompt] ▼▼▼
-                system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다. 당신은 사용자의 '이전 대화 기록'을 기억하고 맥락을 파악할 수 있습니다.
-
-                [당신의 임무]
-                당신은 '검색된 참고 자료'와 '이전 대화 기록', '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
-
-                [행동 지침]
-                1.  **[1단계: 질문 의도 파악]** 먼저 '이전 대화 기록'을 확인하여, 사용자의 새 질문이 "그럼", "거기서", "그분은" 등 이전 대화에 이어지는 **'후속 질문'**인지, 아니면 **'새로운 질문'**인지 판단합니다.
-                
-                2.  **[2단계: 답변 생성]**
-                    * **(A) '후속 질문'일 경우:** (예: "그럼 이메일은?")
-                        - **'이전 대화 기록'을 최우선**으로 참고하여 답변합니다.
-                        - 이 경우 '검색된 참고 자료'는 비어있거나 관련 없을 수 있습니다. **자료를 무시하고 기억을 바탕으로 답하세요.**
-                        - 예: (이전에 '한세경 교수'를 답했다면) "네, 한세경 교수님의 이메일 주소는 XXX@knu.ac.kr입니다."
-                    
-                    * **(B) '새로운 질문'일 경우:** (예: "장학생 정보 알려줘")
-                        - **'검색된 참고 자료'를 최우선**으로 평가합니다.
-                        - (B-1) 자료가 유용하면: 자료에 근거하여 답변합니다.
-                        - (B-2) 자료가 쓸모없으면 (관련 없거나 비어있음): 자료를 무시하고, [규칙 3]에 따라 행동합니다.
-
-                3.  **[3단계: 잡담 또는 정보 없음]**
-                    * 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, (B-2)처럼 쓸모없는 자료를 받은 '새로운 질문'일 경우, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요. (단, 없는 교내 정보를 지어내지는 마세요.)
-                """
-                
-                # ▲▲▲ [수정 완료] ▲▲▲
-                
-                # ▼▼▼ [수정 3] 'user_prompt'에서는 '이전 대화 기록' 섹션을 제거합니다.
-                #    맥락(Context)과 현재 질문(Question)만 남깁니다.
-                user_prompt = f"""
-                ### 검색된 참고 자료 (참고만 하세요):
-                {context}
-
-                ### 사용자의 질문:
-                {question}
-
-                ### 답변:
-                """
-                
-                # API에 전달할 'messages' 리스트 재구성
-                messages_to_send = []
-                messages_to_send.append({"role": "system", "content": system_prompt})
-                # [중요] 이전 대화 기록(list[dict])을 먼저 추가합니다.
-                messages_to_send.extend(history_messages) 
-                # [중요] RAG 컨텍스트가 포함된 'user_prompt'를 마지막에 추가합니다.
-                messages_to_send.append({"role": "user", "content": user_prompt})
-
-                # [디버깅용] API에 전달되는 최종 메시지 목록 확인
-                print("--- [API Request] API로 다음 메시지들을 전송합니다: ---")
-                for msg in messages_to_send:
-                    content_preview = (msg['content'][:150] + '...') if len(msg['content']) > 150 else msg['content']
-                    print(f"  {msg['role']}: {content_preview.replace('  ', ' ')}")
-                print("--------------------------------------------------")
-
-                stream = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=messages_to_send, # <-- (변경) 재구성된 리스트를 전달
-                    stream=True,
-                    temperature=0.7 
-                )
-                
-                collected_answer = ""
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content or ""
-                    if delta:
-                        collected_answer += delta
-                        yield f"data: {json.dumps({'text': delta})}\n\n"
-                
-                save_chat_history(user_id, session_id, question, collected_answer)
+            # 3. 최종 답변 저장
+            save_chat_history(user_id, session_id, question, collected_answer)
 
         except Exception as e:
-            print(f"!!!!!!!!!!!!!! 스트림 중 심각한 오류 발생 !!!!!!!!!!!!!!")
-            import traceback
+            print(f"!!!!!!!!!!!!!! Agent Stream Error !!!!!!!!!!!!!!")
             traceback.print_exc()
             error_message = json.dumps({"error": "답변 생성 중 오류가 발생했습니다."})
             yield f"data: {error_message}\n\n"
             
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+# app/main.py의 @app.post("/ask") 함수 전체를 이걸로 교체하세요.
 
 @app.post("/ask")
 async def ask(req: QuestionRequest):
     try:
-        # ▼▼▼ [수정 1] API가 이해하는 'list[dict]' 형태로 대화 기록을 불러옵니다.
-        history_messages = get_recent_history(req.session_id, n=5) # n=5는 조절 가능
+        history_messages = get_recent_history(req.session_id, n=5)
+        question = req.question
+        user_id = req.user_id
+        session_id = req.session_id
 
-        context, _ = search_similar_documents(req.question)
+        print(f"[Agent Handling] '/ask' route for: '{question}'")
+
+        # 2. 에이전트 비동기 실행 (invoke 대신 ainvoke 사용)
+        response = await agent_executor.ainvoke({
+            "input": question,
+            "chat_history": history_messages
+        })
         
-        system_prompt = """당신은 경북대학교 전기공학과 학생들을 돕는 '자율 AI 비서'입니다. 당신은 사용자의 '이전 대화 기록'을 기억하고 맥락을 파악할 수 있습니다.
-
-        [당신의 임무]
-        당신은 '검색된 참고 자료'와 '이전 대화 기록', '당신의 내부 지식'을 모두 활용하여 사용자에게 가장 도움이 되는 답변을 해야 합니다.
-
-        [행동 지침]
-        1.  **[1단계: 질문 의도 파악]** 먼저 '이전 대화 기록'을 확인하여, 사용자의 새 질문이 "그럼", "거기서", "그분은" 등 이전 대화에 이어지는 **'후속 질문'**인지, 아니면 **'새로운 질문'**인지 판단합니다.
+        answer = response.get("output", "답변 생성에 실패했습니다.")
         
-        2.  **[2단계: 답변 생성]**
-            * **(A) '후속 질문'일 경우:** (예: "그럼 이메일은?")
-                - **'이전 대화 기록'을 최우선**으로 참고하여 답변합니다.
-                - 이 경우 '검색된 참고 자료'는 비어있거나 관련 없을 수 있습니다. **자료를 무시하고 기억을 바탕으로 답하세요.**
-                - 예: (이전에 '한세경 교수'를 답했다면) "네, 한세경 교수님의 이메일 주소는 XXX@knu.ac.kr입니다."
-            
-            * **(B) '새로운 질문'일 경우:** (예: "장학생 정보 알려줘")
-                - **'검색된 참고 자료'를 최우선**으로 평가합니다.
-                - (B-1) 자료가 유용하면: 자료에 근거하여 답변합니다.
-                - (B-2) 자료가 쓸모없으면 (관련 없거나 비어있음): 자료를 무시하고, [규칙 3]에 따라 행동합니다.
-
-        3.  **[3단계: 잡담 또는 정보 없음]**
-            * 사용자의 질문이 '안녕?' 같은 **일상 대화**이거나, (B-2)처럼 쓸모없는 자료를 받은 '새로운 질문'일 경우, **당신의 내부 지식**을 활용하여 자유롭고 친절하게 대화하세요. (단, 없는 교내 정보를 지어내지는 마세요.)
-        """
-        
-        # 2. 'user' 프롬프트에는 질문과 참고 자료(데이터)만 전달합니다.
-        user_prompt = f"""
-        ### 검색된 참고 자료:
-        {context}
-
-        ### 사용자의 질문:
-        {req.question}
-
-        ### 답변:
-        """
-
-        messages_to_send = []
-        messages_to_send.append({"role": "system", "content": system_prompt})
-        messages_to_send.extend(history_messages) # 이전 기록 추가
-        messages_to_send.append({"role": "user", "content": user_prompt}) # RAG + 새 질문 추가
-
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages_to_send, # <-- (변경)
-            temperature=0.7,
-        )
-        answer = response.choices[0].message.content.strip()
-        
-        save_chat_history(req.user_id, req.session_id, req.question, answer)
-
+        save_chat_history(user_id, session_id, question, answer)
         return JSONResponse(content={"answer": answer})
+
     except Exception as e:
-        import traceback
         traceback.print_exc()
         return JSONResponse(content={"error": f"답변 생성 중 오류: {e}"}, status_code=500)
-    
+
 # 2025-09-21
 
 # URL 경로에 user_id를 받도록 변경: @app.get("/sessions") -> @app.get("/sessions/{user_id}")

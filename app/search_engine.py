@@ -1,14 +1,18 @@
+AI-search
+
 # app/search_engine.py
 import os
 import re
 import faiss
 import pickle
+import traceback
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS as LangChainFAISS
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from app.database import chatbot_db
+from langchain.tools import tool # <-- [새로 추가] AI 도구 import
 
 load_dotenv()
 
@@ -122,95 +126,73 @@ def search_members_in_mongodb(query: str):
     return None
 
 # --- 3. 메인 검색 함수 (라우터 로직 통합) ---
+@tool
+def search_similar_documents(query: str, top_k: int = 3) -> str:
+    """
+    "수강신청", "장학생", "취업 정보", "교수님 정보" 등 
+    '졸업 요건'을 제외한 모든 일반적인 교내 정보를 검색할 때 사용합니다.
+    (예: "장학생 관련정보 알려줘", "한세경 교수님 이메일 알려줘")
+    """
+    print(f"\n--- [에이전트 도구 1: 일반 검색] '{query}' 검색 시작 ---")
+    member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
+    job_keywords = ["취업", "인턴", "채용", "회사", "직무"]
 
-def search_similar_documents(query: str, top_k: int = 3): # top_k=3으로 재설정 (진단용)
-    print(f"\n--- [심층 진단] '{query}' 검색 시작 (상위 {top_k}개 요청) ---")
-    member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님", "사무실", "위치", "호관", "호실"]
-    job_keywords = ["취업", "인턴", "채용", "회사", "직무", "자소서", "면접", "공고"]
-
-    # --- 교수님 질문 처리 (MongoDB) ---
+    # (MongoDB 라우팅 로직은 그대로 유지)
     if any(keyword in query for keyword in member_keywords):
         print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 검색 시도")
         mongo_context = search_members_in_mongodb(query)
         if mongo_context:
-            print(f"--- [심층 진단] MongoDB 결과 반환 ---")
-            return mongo_context, ['name', 'position', 'lab', 'email', 'phone']
+            return mongo_context
         else:
-             print(f"[🔍 DB 라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
+            print(f"[🔍 DB 라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
     
-    # --- Vector DB 검색 ---
+    # (Vector DB 검색 로직은 그대로 유지)
     selected_dbs = None
-    db_type = ""
     if any(keyword in query for keyword in job_keywords):
-        print("[진단] 취업 DB 선택")
         selected_dbs = (jobs_db,)
-        db_type = "Jobs"
     else:
-        print("[진단] 공지사항 DB (제목+본문) 선택")
         selected_dbs = (notices_title_db, notices_content_db)
-        db_type = "Notices(Title+Content)"
     
     if not any(db for db in selected_dbs if db is not None):
-        return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패).", []
+        return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패)."
 
     all_results_with_scores = []
-    print(f"--- [심층 진단] {db_type} DB에서 유사도 검색 실행 ---")
-    for i, db in enumerate(selected_dbs):
+    for db in selected_dbs:
         if db:
-            # similarity_search_with_score는 (Document, score) 튜플 리스트 반환
-            results = db.similarity_search_with_score(query, k=top_k) 
-            print(f"  [DB {i+1}] 검색 완료: {len(results)}개 결과 찾음")
-            for doc, score in results:
-                print(f"    - 점수: {score:.4f}, 내용: {doc.page_content[:100]}...") # 점수와 내용 일부 출력
+            results = db.similarity_search_with_score(query, k=top_k)
             all_results_with_scores.extend(results)
 
-    # --- 중복 제거 및 최종 선택 ---
+    # (중복 제거 및 정렬 로직은 그대로 유지)
     unique_results = {}
     for doc, score in all_results_with_scores:
-        # 내용이 같으면 점수(거리)가 더 낮은 (더 유사한) 것으로 갱신
         if doc.page_content not in unique_results or score < unique_results[doc.page_content][1]:
             unique_results[doc.page_content] = (doc, score)
-
-    # 점수(score) 기준으로 오름차순 정렬 (점수가 낮을수록 유사함)
     sorted_results = sorted(unique_results.values(), key=lambda item: item[1])
-    print(f"--- [심층 진단] 중복 제거 및 정렬 후 {len(sorted_results)}개 결과:")
-    for i, (doc, score) in enumerate(sorted_results):
-         print(f"  [최종 순위 {i+1}] 점수: {score:.4f}, 내용: {doc.page_content[:100]}...")
 
-    # 최종 Context 생성 (상위 top_k개 사용)
+    # (Context 생성 로직은 그대로 유지)
     context = ""
-    field_names = set()
-    print(f"--- [심층 진단] 상위 {top_k}개를 최종 Context로 사용 ---")
     for doc, score in sorted_results[:top_k]:
-        context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n" # 점수 포함
-        field_names.update(doc.metadata.keys())
+        context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n"
 
     if not context:
-        print("!!!!!!!!!!!!!! [심층 진단] 최종 컨텍스트가 비어있음 !!!!!!!!!!!!!!")
+        return "검색된 참고 자료가 없습니다."
     else:
-        print(f"--- [심층 진단] 최종 컨텍스트 생성 완료 ---")
-
-    return context, list(field_names)
+        return context
 
 
-
-# app/search_engine.py의 get_graduation_info 함수 전체를 이걸로 교체
-
-
-import re 
-import traceback # <-- 상세 오류 추적을 위해 import 추가
-
-def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
+@tool
+def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
     """
-    MongoDB에서 학번(applied_year_range)과 ABEEK 상태(abeek: true/false)에 맞는 
-    졸업 요건을 검색합니다. (루프 내 오류 로깅 추가)
+    [진단 모드] 졸업 요건 검색 함수
     """
-    print("--- [get_graduation_info] 함수 시작 ---")
+    print(f"\n--- [진단 시작] 학번: {student_id_prefix}, ABEEK: {abeek_bool} ---")
+    
     try:
-        collection = chatbot_db["graduation_requirements2"] 
-        print(f"--- [get_graduation_info] 컬렉션 '{collection.name}' 선택 완료 ---")
+        # 1. 컬렉션 이름 확인 (가장 흔한 원인!)
+        COLLECTION_NAME = "graduation_requirements" # <--- 님 DB 컬렉션 이름과 같은지 꼭 확인!
+        collection = chatbot_db[COLLECTION_NAME] 
         
-        # --- [1. 학번 변환 로직] ---
+        # 2. 학번 변환
         search_year = -1 
         try:
             year_prefix_num = int(student_id_prefix)
@@ -218,54 +200,52 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
                 search_year = 2000 + year_prefix_num 
             else:
                 search_year = year_prefix_num
-            print(f"[학번 변환] 입력 '{student_id_prefix}' -> 검색 연도 '{search_year}'")
+            print(f"[1. 학번 변환] 입력 '{student_id_prefix}' -> 검색용 연도 '{search_year}'")
         except ValueError:
             return f"입력하신 학번 '{student_id_prefix}'이(가) 올바르지 않습니다."
         
-        # --- [2. MongoDB 쿼리] ---
+        # 3. DB 쿼리 실행
         query = { "abeek": abeek_bool }
-        print(f"--- [MongoDB] 쿼리 실행 직전: {query} ---")
-        all_reqs_for_abeek = list(collection.find(query))
-        print(f"--- [MongoDB] 쿼리 실행 완료: {len(all_reqs_for_abeek)}개 찾음 ---")
+        print(f"[2. DB 쿼리] 조건: {query}")
         
+        all_reqs_for_abeek = list(collection.find(query))
+        print(f"[3. 쿼리 결과] 총 {len(all_reqs_for_abeek)}개의 문서를 찾았습니다.")
+        
+        if len(all_reqs_for_abeek) == 0:
+            print("⚠️ [경고] 해당 조건의 문서가 0개입니다. 컬렉션 이름이나 데이터(abeek 필드)를 확인하세요.")
+            return f"DB에서 ABEEK 상태가 {abeek_bool}인 문서를 하나도 찾지 못했습니다."
+
         result = None 
         
-        # --- [3. 학번 범위 매칭 루프] ---
-        print("--- [get_graduation_info] 학번 범위 매칭 시작 ---")
+        # 4. 매칭 루프
+        print("[4. 범위 매칭 시작]")
         for i, req_doc in enumerate(all_reqs_for_abeek):
-            range_str = req_doc.get("applied_year_range", "") 
-            print(f"  [루프 {i+1}] 문서 범위 확인 중: '{range_str}'")
+            range_str = req_doc.get("applied_year_range", "필드없음")
+            print(f"  [{i+1}번 문서] 범위: '{range_str}'")
             
-            range_start_year = -1
-            range_end_year = float('inf') 
-            
-            # ▼▼▼ [핵심 수정] ▼▼▼
             try:
-                year_numbers = re.findall(r'\d+', range_str)
-                if len(year_numbers) == 1: 
-                    range_start_year = int(year_numbers[0])
-                elif len(year_numbers) == 2: 
-                    range_start_year = int(year_numbers[0])
-                    range_end_year = int(year_numbers[1])
+                year_numbers = re.findall(r'\d+', str(range_str))
+                if not year_numbers:
+                    print("    -> ⚠️ 숫자 추출 실패")
+                    continue
+
+                range_start = int(year_numbers[0])
+                # 숫자가 1개면(예: 2025~) 끝은 무한대, 2개면(예: 2018~2022) 두번째 숫자
+                range_end = int(year_numbers[1]) if len(year_numbers) > 1 else float('inf')
                 
-                is_after_start = (range_start_year <= search_year)
-                is_before_end = (search_year <= range_end_year)
-                is_match = is_after_start and is_before_end
+                # 비교 로직
+                is_match = (range_start <= search_year <= range_end)
                 
-                print(f"    -> 파싱: {range_start_year}~{range_end_year} / 비교: ({is_after_start} AND {is_before_end}) = {is_match}") # 로그 추가
+                print(f"    -> 파싱: {range_start} ~ {range_end}")
+                print(f"    -> 비교: {range_start} <= {search_year} <= {range_end} ? 결과: {is_match}")
 
                 if is_match:
                     result = req_doc
-                    print(f"    -> ✅ 매칭 성공! 이 문서 사용.")
+                    print("    -> 🎉 정답 문서를 찾았습니다!")
                     break 
-                else:
-                    print(f"    -> ❌ 매칭 실패.")
-
-            except Exception as e: 
-                print(f"!!!!!!!!!!!!!! [루프 {i+1}] 범위 매칭 중 오류 발생 !!!!!!!!!!!!!!")
-                print(f"    -> 오류 내용: {e}")
-                traceback.print_exc() # 상세 오류 스택 출력
-                continue # 다음 루프로 넘어감
+            except Exception as e:
+                print(f"    -> ❌ 에러 발생: {e}")
+                continue
             
         # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
@@ -338,11 +318,122 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool):
             # ▲▲▲ [수정 완료] ▲▲▲
             return context
         else:
-            fail_msg = f"{student_id_prefix}학번, ABEEK {'O' if abeek_bool else 'X'} 학생에 대한 맞춤형 졸업 요건을 DB에서 찾지 못했습니다."
-            return fail_msg
+            print("[5. 결과] 매칭되는 문서를 찾지 못했습니다.")
+            return f"{student_id_prefix}학번({search_year}), ABEEK {abeek_bool} 조건에 맞는 범위를 찾을 수 없습니다."
             
     except Exception as e:
-        print(f"!!!!!!!!!!!!!! MongoDB 졸업 요건 검색 중 치명적 오류 발생 !!!!!!!!!!!!!!")
-        import traceback
+        print(f"!!!!!!!!!!!!!! 치명적 오류 !!!!!!!!!!!!!!")
         traceback.print_exc()
-        return "졸업 요건 DB를 검색하는 중 오류가 발생했습니다."
+        return "오류가 발생했습니다."
+
+
+@tool
+def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool = None, grade: int = None, semester: int = None, subject_type: str = None, module: str = None) -> str:
+    """
+    [설명서] '교과과정', '개설 과목', '수업 목록'을 검색합니다.
+    
+    [중요 규칙]
+    1. 사용자가 특정 '모듈'(예: "스마트 계통", "전력전자", "반도체") 관련 과목을 물어본다면,
+       **'student_id_prefix'와 'abeek_bool'은 입력하지 않아도 됩니다 (None).**
+       이 경우, 전체 데이터베이스에서 해당 모듈 과목을 검색합니다.
+    
+    2. 그 외 특정 학년/학기 시간표를 짤 때는 학번과 ABEEK 정보가 필요합니다.
+    """
+    print(f"\n--- [에이전트 도구 3: 교과과정 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool}, 모듈: {module} ---")
+    
+    try:
+        collection = chatbot_db["graduation_requirements"]
+        
+        target_docs = []
+
+        # 1. 학번 정보가 없으면 -> DB의 모든 문서를 다 가져옴 (모듈 검색용)
+        if student_id_prefix is None:
+            print("    -> 학번 정보 없음. 전체 문서에서 검색합니다.")
+            target_docs = list(collection.find({})) # 조건 없이 모두 검색
+        
+        # 2. 학번 정보가 있으면 -> 해당 학번 문서만 가져옴
+        else:
+            search_year = -1
+            try:
+                year_prefix_num = int(student_id_prefix)
+                if 0 <= year_prefix_num <= 99: search_year = 2000 + year_prefix_num
+                else: search_year = year_prefix_num
+            except ValueError:
+                return "학번 형식이 올바르지 않습니다."
+            
+            # ABEEK 정보가 없으면 기본적으로 True(공학인증)로 가정하거나 둘 다 검색
+            query = {}
+            if abeek_bool is not None:
+                query["abeek"] = abeek_bool
+            
+            all_docs = list(collection.find(query))
+            
+            # 학번 범위 매칭
+            for doc in all_docs:
+                range_str = doc.get("applied_year_range", "")
+                try:
+                    nums = re.findall(r'\d+', range_str)
+                    if not nums: continue
+                    start = int(nums[0])
+                    end = int(nums[1]) if len(nums) > 1 else float('inf')
+                    if start <= search_year <= end:
+                        target_docs.append(doc)
+                        break # 학번이 특정되면 문서 1개만 찾으면 됨
+                except: continue
+
+        if not target_docs:
+            return "조건에 맞는 교과과정 문서를 찾을 수 없습니다."
+
+        # --- [과목 수집 및 필터링] ---
+        all_found_subjects = []
+        seen_courses = set() # 중복 제거용
+
+        for doc in target_docs:
+            # 문서 구조에 따라 subjects 위치 찾기
+            # 1순위: doc['curriculum']['subjects']
+            # 2순위: doc['requirements']['curriculum']['subjects'] (혹시 모를 변수)
+            subjects = doc.get('curriculum', {}).get('subjects', [])
+            
+            for sub in subjects:
+                # 1. 모듈 필터링 (가장 중요)
+                if module:
+                    # 모듈 데이터가 없거나 일치하지 않으면 패스
+                    sub_module = sub.get('module', '')
+                    if not sub_module or module not in sub_module:
+                        continue
+                
+                # 2. 학년/학기/구분 필터링
+                if grade and sub.get('grade') != grade: continue
+                if semester and sub.get('semester') != semester: continue
+                if subject_type and subject_type not in sub.get('type', ''): continue
+
+                # 중복 제거 (과목명 기준)
+                course_name = sub.get('course_name', '').strip()
+                if course_name not in seen_courses:
+                    seen_courses.add(course_name)
+                    all_found_subjects.append(sub)
+
+        if not all_found_subjects:
+            return f"조건(모듈: {module}, 학년: {grade})에 맞는 과목이 없습니다."
+
+        # --- [결과 포맷팅] ---
+        context = f"[검색 결과] "
+        if module: context += f"모듈: '{module}' 관련 과목 목록\n"
+        else: context += "교과과정 목록\n"
+        
+        # 학번 정보가 없으면 '전체 학번 대상'이라고 표시
+        if student_id_prefix is None:
+            context += "- 대상: 전체 학번 통합 검색\n"
+        
+        context += f"- 검색된 과목 수: {len(all_found_subjects)}개\n\n"
+
+        for sub in all_found_subjects[:30]: # 최대 30개
+            mod_str = f", 모듈: {sub.get('module')}" if sub.get('module') else ""
+            context += f"  - {sub.get('course_name')} (학년: {sub.get('grade')}, 구분: {sub.get('type')}{mod_str})\n"
+
+        return context
+
+    except Exception as e:
+        print(f"오류 발생: {e}")
+        traceback.print_exc()
+        return "검색 중 오류가 발생했습니다."
