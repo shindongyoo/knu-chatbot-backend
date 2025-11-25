@@ -347,8 +347,9 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
         if module and student_id_prefix is None:
             print("    -> 모듈 검색 모드. 전체 문서에서 검색합니다.")
             # abeek 조건만 맞추거나, 전체 검색
-            query = {"abeek": True} if abeek_bool is None else {"abeek": abeek_bool}
+            query = {} if abeek_bool is None else {"abeek": abeek_bool}
             target_docs = list(collection.find(query))
+            print(f"    -> 검색 대상 문서 수: {len(target_docs)}개") # 디버깅용 로그 추가
 
         # --- [B. 일반 검색 (학번 필수)] ---
         else:
