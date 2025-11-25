@@ -1,5 +1,3 @@
-AI-search
-
 # app/search_engine.py
 import os
 import re

@@ -1,5 +1,3 @@
-AI-main
-
 # app/main.py
 import os
 import json
