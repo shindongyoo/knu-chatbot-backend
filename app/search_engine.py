@@ -187,7 +187,7 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
     
     try:
         # 1. 컬렉션 이름 확인 (가장 흔한 원인!)
-        COLLECTION_NAME = "graduation_requirements" # <--- 님 DB 컬렉션 이름과 같은지 꼭 확인!
+        COLLECTION_NAME = "graduation_requirements2" # <--- 님 DB 컬렉션 이름과 같은지 꼭 확인!
         collection = chatbot_db[COLLECTION_NAME] 
         
         # 2. 학번 변환
@@ -340,7 +340,7 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
     print(f"\n--- [에이전트 도구 3: 교과과정 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool}, 모듈: {module} ---")
     
     try:
-        collection = chatbot_db["graduation_requirements"]
+        collection = chatbot_db["graduation_requirements2"]
         
         target_docs = []
 
@@ -389,7 +389,7 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
         for doc in target_docs:
             # 문서 구조에 따라 subjects 위치 찾기
             # 1순위: doc['curriculum']['subjects']
-            # 2순위: doc['requirements']['curriculum']['subjects'] (혹시 모를 변수)
+            # 2순위: doc['requirements2']['curriculum']['subjects'] (혹시 모를 변수)
             subjects = doc.get('curriculum', {}).get('subjects', [])
             
             for sub in subjects:
