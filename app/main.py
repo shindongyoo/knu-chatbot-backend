@@ -26,9 +26,8 @@ client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from app.database import chatbot_db, r
 
 # --- [핵심 수정: 함수들을 '도구'로 import] ---
-from app.search_engine import search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword
-tools = [search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword]
-
+from app.search_engine import search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword, get_employment_stats
+tools = [search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword, get_employment_stats]
 # ----------------------------------------
 
 # FastAPI 앱 설정
@@ -166,6 +165,7 @@ AGENT_SYSTEM_PROMPT = """당신은 경북대학교 전기공학과 학생들을 
 2. `get_graduation_info`: '졸업 요건' 상세 정보 검색. (학번 필수)
 3. `search_curriculum_subjects`: 교과과정, 과목, 모듈 검색.
 4. `search_professors_by_keyword`: 특정 '분야'나 '모듈'과 관련된 교수님 검색.
+5. `get_employment_stats`: 취업률, 취업 통계, 취업한 회사 목록 검색.
 
 [행동 지침 및 우선순위]
 
@@ -193,6 +193,9 @@ AGENT_SYSTEM_PROMPT = """당신은 경북대학교 전기공학과 학생들을 
 5. **[맥락 파악 및 잡담]**
    - '이전 대화 기록'을 확인하여 "그럼 이메일은?" 같은 후속 질문을 자연스럽게 처리하세요.
    - "안녕?" 같은 단순 대화는 도구 없이 친절하게 대답하세요.
+   
+6. **[취업 통계/현황 질문]**
+   - 사용자가 "취업률 어때?", "선배들 어디 취업했어?", "삼성 간 사람 있어?", "대기업 많이 가?" 처럼 **취업 실적이나 통계**를 물어보면 `get_employment_stats` 도구를 사용하세요.
 """
 
 agent_prompt = ChatPromptTemplate.from_messages([

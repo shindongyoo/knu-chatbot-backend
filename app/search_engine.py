@@ -451,3 +451,76 @@ def search_professors_by_keyword(keyword: str) -> str:
         print(f"교수님 분야 검색 오류: {e}")
         traceback.print_exc()
         return "교수님 검색 중 오류가 발생했습니다."
+
+@tool
+def get_employment_stats(year: int = 2023) -> str:
+    """
+    [설명서] '취업률', '취업 통계', '진로 현황', '어떤 회사 갔어?', '대기업 취업 비율' 등
+    학과 졸업생들의 취업 실적과 통계 데이터를 검색할 때 사용합니다.
+    기본적으로 2023년 데이터를 검색합니다.
+    """
+    print(f"\n--- [에이전트 도구 4: 취업 통계 검색] 연도: {year} ---")
+    
+    try:
+        # 1. 컬렉션 이름 확인 (MongoDB에 이 컬렉션이 있어야 합니다!)
+        collection = chatbot_db["employment_rate_2023"] 
+        
+        # 2. 연도(year)로 문서 검색
+        query = {"year": year}
+        result = collection.find_one(query)
+        
+        if not result:
+            # 특정 연도가 없으면 가장 최신 데이터를 가져오도록 유도하거나 전체 목록 확인
+            return f"{year}년도 취업 통계 데이터를 찾을 수 없습니다."
+            
+        # 3. 데이터 파싱 및 Context 생성
+        stats = result.get('stats', {})
+        
+        # 3-1. 전체 현황
+        overall = stats.get('1_overall_status', {})
+        overall_text = (
+            f"- 졸업자: {overall.get('graduates')}명, 취업자: {overall.get('employed')}명\n"
+            f"- 진학: {overall.get('advanced_study')}명, 미취업: {overall.get('unemployed')}명\n"
+            f"- 📈 취업률: {overall.get('employment_rate')} (진학률: {overall.get('advancement_rate')})"
+        )
+        
+        # 3-2. 기업 형태별 요약
+        company_summary = stats.get('3_company_type_summary', {})
+        dist_list = company_summary.get('distribution', [])
+        dist_text = ", ".join([f"{d['type']}: {d['ratio']}({d['count']}명)" for d in dist_list])
+        
+        # 3-3. 상세 취업처 (리스트 포맷팅 헬퍼 함수)
+        def format_companies(company_list):
+            if not company_list: return "없음"
+            # 예: "현대자동차(5), LG전자(3)"
+            return ", ".join([f"{c['name']}({c['count']}명)" for c in company_list])
+
+        details = stats.get('4_employment_details', {})
+        large_ent = format_companies(details.get('large_enterprise', []))
+        medium_ent = format_companies(details.get('medium_enterprise', []))
+        small_ent = format_companies(details.get('small_medium_enterprise', []))
+        public_inst = format_companies(details.get('public_institution', []))
+        
+        # 4. 최종 Context 조합
+        context = f"""
+        [검색된 {year}년도 전기공학과 취업 통계]
+        
+        1. 전체 현황
+        {overall_text}
+        
+        2. 기업 형태별 분포
+        - {dist_text}
+        
+        3. 주요 취업처 상세 (기업명 및 인원)
+        - 🏢 대기업: {large_ent}
+        - 🏭 중견기업: {medium_ent}
+        - 🏘️ 중소기업: {small_ent}
+        - 🏛️ 공공기관/공기업: {public_inst}
+        """
+        
+        return context
+
+    except Exception as e:
+        print(f"취업 통계 검색 오류: {e}")
+        traceback.print_exc()
+        return "취업 통계 정보를 가져오는 중 오류가 발생했습니다."
