@@ -26,9 +26,9 @@ client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from app.database import chatbot_db, r
 
 # --- [핵심 수정: 함수들을 '도구'로 import] ---
-from app.search_engine import search_similar_documents, get_graduation_info, search_curriculum_subjects
-tools = [search_similar_documents, get_graduation_info, search_curriculum_subjects]
-# ----------------------------------------
+from app.search_engine import search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword
+tools = [search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword]
+
 # ----------------------------------------
 
 # FastAPI 앱 설정
