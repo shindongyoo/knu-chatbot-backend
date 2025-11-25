@@ -1,4 +1,5 @@
 # app/main.py
+import io
 import os
 import json
 import time
@@ -44,6 +45,76 @@ class QuestionRequest(BaseModel):
     user_id: str
     session_id: str
     question: str
+
+# app/main.py 파일에 추가
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    session_id: str = Form(...),
+    user_id: str = Form(...)
+):
+    """
+    이미지나 PDF 파일을 받아 텍스트를 추출(OCR)하고 대화 내역에 저장합니다.
+    """
+    print(f"--- [파일 업로드] 시작: {file.filename} (User: {user_id}) ---")
+    
+    try:
+        contents = await file.read()
+        extracted_text = ""
+
+        # 1. 이미지 처리 (OCR)
+        if file.content_type.startswith("image/"):
+            try:
+                image = Image.open(io.BytesIO(contents))
+                # 한국어(kor)와 영어(eng)를 모두 인식하도록 설정
+                # (주의: 서버에 tesseract-ocr 데이터가 설치되어 있어야 함)
+                extracted_text = pytesseract.image_to_string(image, lang='kor+eng')
+                print("    -> 이미지 OCR 완료")
+            except Exception as e:
+                print(f"    -> 이미지 처리 실패: {e}")
+                return JSONResponse(content={"error": "이미지 처리 중 오류가 발생했습니다."}, status_code=500)
+
+        # 2. PDF 처리
+        elif file.content_type == "application/pdf":
+            try:
+                pdf_reader = PdfReader(io.BytesIO(contents))
+                for page in pdf_reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        extracted_text += text + "\n"
+                print("    -> PDF 텍스트 추출 완료")
+            except Exception as e:
+                print(f"    -> PDF 처리 실패: {e}")
+                return JSONResponse(content={"error": "PDF 처리 중 오류가 발생했습니다."}, status_code=500)
+
+        else:
+            return JSONResponse(content={"error": "지원하지 않는 파일 형식입니다. (이미지 또는 PDF만 가능)"}, status_code=400)
+
+        # 3. 텍스트 후처리
+        extracted_text = extracted_text.strip()
+        if not extracted_text:
+            extracted_text = "(파일에서 텍스트를 추출할 수 없습니다. 이미지가 깨졌거나 텍스트가 없는 스캔본일 수 있습니다.)"
+
+        # 4. ★중요★ 추출된 텍스트를 '사용자가 보낸 메시지'로 간주하고 Redis에 저장
+        # 이렇게 해야 AI 에이전트가 이전 대화 기록(history)을 볼 때 파일 내용을 알 수 있습니다.
+        user_message = f"[파일 업로드: {file.filename}]\n{extracted_text}"
+        ai_ack_message = f"파일 '{file.filename}'을 업로드하셨군요. 내용을 확인했습니다."
+        
+        save_chat_history(user_id, session_id, user_message, ai_ack_message)
+
+        print(f"--- [파일 업로드] 완료. 추출 텍스트 길이: {len(extracted_text)}자 ---")
+
+        return {
+            "filename": file.filename,
+            "extracted_text": extracted_text,
+            "message": "파일이 성공적으로 처리되었습니다."
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(content={"error": f"업로드 처리 중 오류: {e}"}, status_code=500)
 
 def get_recent_history(session_id: str, n=5) -> list[dict]: # n=3 -> n=5 (조절 가능)
     """
