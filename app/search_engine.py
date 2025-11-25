@@ -412,3 +412,42 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
     except Exception as e:
         traceback.print_exc()
         return "검색 중 오류 발생"
+    
+@tool
+def search_professors_by_keyword(keyword: str) -> str:
+    """
+    "스마트 계통", "전력전자", "반도체", "인공지능" 등 특정 '분야'나 '모듈' 키워드로 
+    관련된 교수님 정보를 찾을 때 사용합니다. (이름 검색 아님)
+    """
+    print(f"\n--- [에이전트 도구 4: 교수님 분야 검색] 키워드: {keyword} ---")
+    try:
+        collection = chatbot_db["members"] 
+        
+        # 정규식으로 '전공(major)' 또는 '연구실(lab)'에 키워드가 포함된 교수 검색
+        query = {
+            "$or": [
+                {"major": {"$regex": keyword, "$options": "i"}},
+                {"lab": {"$regex": keyword, "$options": "i"}}
+            ]
+        }
+        
+        results = list(collection.find(query))
+        
+        if not results:
+            return f"'{keyword}' 분야와 관련된 교수님 정보를 찾지 못했습니다."
+            
+        # 결과 포맷팅
+        context = f"[검색된 '{keyword}' 관련 교수님 목록]\n"
+        for member in results:
+            context += f"- 이름: {member.get('name', 'N/A')} 교수\n"
+            context += f"  - 연구실: {member.get('lab', 'N/A')}\n"
+            context += f"  - 전공분야: {member.get('major', 'N/A')}\n"
+            context += f"  - 이메일: {member.get('email', 'N/A')}\n"
+            context += "---\n"
+            
+        return context
+
+    except Exception as e:
+        print(f"교수님 분야 검색 오류: {e}")
+        traceback.print_exc()
+        return "교수님 검색 중 오류가 발생했습니다."
