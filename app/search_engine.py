@@ -329,40 +329,40 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
 def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool = None, grade: int = None, semester: int = None, subject_type: str = None, module: str = None) -> str:
     """
     [설명서] '교과과정', '개설 과목', '수업 목록'을 검색합니다.
+    학번(student_id_prefix)과 ABEEK(abeek_bool)이 필요합니다.
     
-    [중요 규칙]
-    1. 사용자가 특정 '모듈'(예: "스마트 계통", "전력전자", "반도체") 관련 과목을 물어본다면,
-       **'student_id_prefix'와 'abeek_bool'은 입력하지 않아도 됩니다 (None).**
-       이 경우, 전체 데이터베이스에서 해당 모듈 과목을 검색합니다.
-    
-    2. 그 외 특정 학년/학기 시간표를 짤 때는 학번과 ABEEK 정보가 필요합니다.
+    [특수 규칙]
+    사용자가 "스마트 계통", "전력전자" 등 특정 '모듈' 과목을 물어본다면,
+    학번/ABEEK 정보 없이(None) 모듈명만으로 전체 DB를 검색합니다.
     """
     print(f"\n--- [에이전트 도구 3: 교과과정 검색] 학번: {student_id_prefix}, ABEEK: {abeek_bool}, 모듈: {module} ---")
     
     try:
-        collection = chatbot_db["graduation_requirements2"]
+        # 1. 컬렉션 이름 확인 (졸업요건과 같은 컬렉션 사용)
+        collection = chatbot_db["graduation_requirements"] 
         
         target_docs = []
 
-        # 1. 학번 정보가 없으면 -> DB의 모든 문서를 다 가져옴 (모듈 검색용)
-        if student_id_prefix is None:
-            print("    -> 학번 정보 없음. 전체 문서에서 검색합니다.")
-            target_docs = list(collection.find({})) # 조건 없이 모두 검색
-        
-        # 2. 학번 정보가 있으면 -> 해당 학번 문서만 가져옴
+        # --- [A. 모듈 검색 (학번 무시)] ---
+        if module and student_id_prefix is None:
+            print("    -> 모듈 검색 모드. 전체 문서에서 검색합니다.")
+            # abeek 조건만 맞추거나, 전체 검색
+            query = {"abeek": True} if abeek_bool is None else {"abeek": abeek_bool}
+            target_docs = list(collection.find(query))
+
+        # --- [B. 일반 검색 (학번 필수)] ---
         else:
             search_year = -1
             try:
-                year_prefix_num = int(student_id_prefix)
-                if 0 <= year_prefix_num <= 99: search_year = 2000 + year_prefix_num
-                else: search_year = year_prefix_num
+                if student_id_prefix:
+                    year_prefix_num = int(student_id_prefix)
+                    if 0 <= year_prefix_num <= 99: search_year = 2000 + year_prefix_num
+                    else: search_year = year_prefix_num
             except ValueError:
                 return "학번 형식이 올바르지 않습니다."
             
-            # ABEEK 정보가 없으면 기본적으로 True(공학인증)로 가정하거나 둘 다 검색
             query = {}
-            if abeek_bool is not None:
-                query["abeek"] = abeek_bool
+            if abeek_bool is not None: query["abeek"] = abeek_bool
             
             all_docs = list(collection.find(query))
             
@@ -376,7 +376,7 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
                     end = int(nums[1]) if len(nums) > 1 else float('inf')
                     if start <= search_year <= end:
                         target_docs.append(doc)
-                        break # 학번이 특정되면 문서 1개만 찾으면 됨
+                        break 
                 except: continue
 
         if not target_docs:
@@ -384,18 +384,19 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
 
         # --- [과목 수집 및 필터링] ---
         all_found_subjects = []
-        seen_courses = set() # 중복 제거용
+        seen_courses = set() 
 
+        print(f"--- [디버깅] 문서 {len(target_docs)}개에서 과목 검색 시작 ---")
+        
         for doc in target_docs:
-            # 문서 구조에 따라 subjects 위치 찾기
-            # 1순위: doc['curriculum']['subjects']
-            # 2순위: doc['requirements2']['curriculum']['subjects'] (혹시 모를 변수)
-            subjects = doc.get('curriculum', {}).get('subjects', [])
+            # ▼▼▼ 스키마 반영: doc['curriculum']['subjects'] ▼▼▼
+            curriculum_data = doc.get('curriculum', {})
+            if not curriculum_data: continue
+            subjects = curriculum_data.get('subjects', [])
             
             for sub in subjects:
-                # 1. 모듈 필터링 (가장 중요)
+                # 1. 모듈 필터링 (부분 일치 허용)
                 if module:
-                    # 모듈 데이터가 없거나 일치하지 않으면 패스
                     sub_module = sub.get('module', '')
                     if not sub_module or module not in sub_module:
                         continue
@@ -405,7 +406,7 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
                 if semester and sub.get('semester') != semester: continue
                 if subject_type and subject_type not in sub.get('type', ''): continue
 
-                # 중복 제거 (과목명 기준)
+                # 중복 제거
                 course_name = sub.get('course_name', '').strip()
                 if course_name not in seen_courses:
                     seen_courses.add(course_name)
@@ -419,13 +420,14 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
         if module: context += f"모듈: '{module}' 관련 과목 목록\n"
         else: context += "교과과정 목록\n"
         
-        # 학번 정보가 없으면 '전체 학번 대상'이라고 표시
-        if student_id_prefix is None:
-            context += "- 대상: 전체 학번 통합 검색\n"
+        if student_id_prefix:
+             context += f"- 대상: {student_id_prefix}학번 (ABEEK {'O' if abeek_bool else 'X'})\n"
+        else:
+             context += "- 대상: 전체 학번 통합 검색\n"
         
         context += f"- 검색된 과목 수: {len(all_found_subjects)}개\n\n"
 
-        for sub in all_found_subjects[:30]: # 최대 30개
+        for sub in all_found_subjects[:30]: 
             mod_str = f", 모듈: {sub.get('module')}" if sub.get('module') else ""
             context += f"  - {sub.get('course_name')} (학년: {sub.get('grade')}, 구분: {sub.get('type')}{mod_str})\n"
 
