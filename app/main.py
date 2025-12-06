@@ -14,11 +14,11 @@ from PyPDF2 import PdfReader
 from PIL import Image
 from dotenv import load_dotenv
 import traceback # 오류 로깅
+from typing import Optional
 
 from langchain.agents import AgentExecutor, create_openai_functions_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
-
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
@@ -26,9 +26,22 @@ client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from app.database import chatbot_db, r
 
 # --- [핵심 수정: 함수들을 '도구'로 import] ---
-from app.search_engine import search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword, get_employment_stats
-tools = [search_similar_documents, get_graduation_info, search_curriculum_subjects, search_professors_by_keyword, get_employment_stats]
-# ----------------------------------------
+from app.search_engine import (
+    search_similar_documents, 
+    get_graduation_info, 
+    search_curriculum_subjects, 
+    search_professors_by_keyword, 
+    get_employment_stats
+)
+
+# 5개의 도구를 모두 등록합니다.
+tools = [
+    search_similar_documents, 
+    get_graduation_info, 
+    search_curriculum_subjects, 
+    search_professors_by_keyword, 
+    get_employment_stats
+]
 
 # FastAPI 앱 설정
 app = FastAPI()
@@ -205,9 +218,10 @@ agent_prompt = ChatPromptTemplate.from_messages([
     MessagesPlaceholder(variable_name="agent_scratchpad"), # AI의 '생각'이 들어올 자리
 ])
 
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
 # --- [에이전트 실행기 생성] ---
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
 agent = create_openai_functions_agent(llm, tools, agent_prompt) # <--- llm (정상)
 agent_executor = AgentExecutor(
     agent=agent,
@@ -225,9 +239,7 @@ def stream_answer(req: QuestionRequest):
 
     def event_generator():
         try:
-            # --- [수정] 모든 if문, 상태 관리 로직 삭제 ---
             print(f"[Agent Handling] '{question}'")
-            
             # 1. 이전 대화 기록 불러오기 (API 형식)
             history_messages = get_recent_history(session_id, n=5)
             
@@ -291,25 +303,18 @@ async def ask(req: QuestionRequest):
 # URL 경로에 user_id를 받도록 변경: @app.get("/sessions") -> @app.get("/sessions/{user_id}")
 @app.get("/sessions/{user_id}")
 async def get_sessions(user_id: str):
-    if not r:
-        return JSONResponse(content={"error": "Redis not connected"}, status_code=500)
+    if not r: return JSONResponse(content={"error": "Redis not connected"}, status_code=500)
     try:
-        # 해당 사용자의 세션 목록만 가져오도록 키 변경
-        session_ids = r.zrevrange(f"user:{user_id}:sessions_sorted", 0, 4) # 최근 5개
-        
+        session_ids = r.zrevrange(f"user:{user_id}:sessions_sorted", 0, 4)
         sessions_with_titles = []
         for session_id in session_ids:
             first_log_raw = r.lrange(f"chat:{session_id}", 0, 0)
             if first_log_raw:
                 first_question = json.loads(first_log_raw[0]).get("question", "알 수 없는 대화")
-                sessions_with_titles.append({
-                    "session_id": session_id,
-                    "title": first_question[:50]
-                })
+                sessions_with_titles.append({"session_id": session_id, "title": first_question[:50]})
         return JSONResponse(content={"sessions": sessions_with_titles})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
-
 
 # ▼▼▼ 이 함수 전체를 복사해서 붙여넣으세요 ▼▼▼
 @app.get("/history/{session_id}")

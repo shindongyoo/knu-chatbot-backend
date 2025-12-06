@@ -11,6 +11,7 @@ from langchain_core.documents import Document
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from app.database import chatbot_db
 from langchain.tools import tool # <-- [새로 추가] AI 도구 import
+from openai import OpenAI
 
 load_dotenv()
 
@@ -74,6 +75,29 @@ def load_vector_db_manually(folder_path, index_name):
         index_to_docstore_id=index_to_docstore_id
     )
 
+def optimize_search_query(query: str) -> str:
+    """
+    사용자의 애매한 질문을 공지사항/규정 DB 검색에 적합한 '핵심 키워드 문장'으로 변환합니다.
+    예: "학교 좀 쉬고 싶어" -> "휴학 신청 절차 및 기간"
+    예: "돈 주는거 뭐 있어?" -> "장학금 종류 및 신청 안내"
+    """
+    try:
+        client = OpenAI() # 환경변수 API KEY 사용
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "당신은 검색어 최적화 도구입니다. 사용자의 질문을 대학교 공지사항이나 규정집에서 검색하기 가장 좋은 '공식적인 용어'와 '문장'으로 변환해서 딱 그 문장만 대답하세요."},
+                {"role": "user", "content": f"질문: {query}"}
+            ],
+            temperature=0
+        )
+        optimized_query = response.choices[0].message.content.strip()
+        print(f"    [검색어 변환] '{query}' -> '{optimized_query}'")
+        return optimized_query
+    except Exception as e:
+        print(f"    [변환 실패] 원본 사용: {e}")
+        return query
+
 # Vector DB 로딩
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 notices_title_db = None
@@ -128,24 +152,29 @@ def search_members_in_mongodb(query: str):
 @tool
 def search_similar_documents(query: str, top_k: int = 3) -> str:
     """
-    "수강신청", "장학생", "취업 정보", "교수님 정보" 등 
-    '졸업 요건'을 제외한 모든 일반적인 교내 정보를 검색할 때 사용합니다.
-    (예: "장학생 관련정보 알려줘", "한세경 교수님 이메일 알려줘")
+    "수강신청", "장학생", "교수님 정보", "학사 일정" 등 
+    '졸업 요건'이나 '교과과정'을 제외한 모든 일반적인 교내 정보를 검색할 때 사용합니다.
+    질문이 애매해도 찰떡같이 알아듣고 검색합니다.
     """
-    print(f"\n--- [에이전트 도구 1: 일반 검색] '{query}' 검색 시작 ---")
+    print(f"\n--- [에이전트 도구 1: 일반 검색] 원본 질문: '{query}' ---")
+    
+    # 1. 질문을 DB 친화적으로 변환 (여기가 핵심!)
+    optimized_query = optimize_search_query(query)
+    
+    # 2. 교수님 키워드 확인 (기존 로직 유지)
     member_keywords = ["교수", "교수님", "연구실", "이메일", "연락처", "조교", "선생님"]
     job_keywords = ["취업", "인턴", "채용", "회사", "직무"]
 
-    # (MongoDB 라우팅 로직은 그대로 유지)
+    # (MongoDB 라우팅 로직)
     if any(keyword in query for keyword in member_keywords):
-        print(f"[🔍 DB 라우팅] '{query}' -> MongoDB 검색 시도")
-        mongo_context = search_members_in_mongodb(query)
+        print(f"    [라우팅] 교수님 검색 모드")
+        mongo_context = search_members_in_mongodb(query) # 원본 이름 사용 (이름은 변환하면 안됨)
         if mongo_context:
             return mongo_context
         else:
-            print(f"[🔍 DB 라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
+            print(f"    [라우팅] MongoDB 결과 없음. Vector DB로 계속 진행...")
     
-    # (Vector DB 검색 로직은 그대로 유지)
+    # 3. Vector DB 검색 (변환된 optimized_query 사용!)
     selected_dbs = None
     if any(keyword in query for keyword in job_keywords):
         selected_dbs = (jobs_db,)
@@ -156,28 +185,32 @@ def search_similar_documents(query: str, top_k: int = 3) -> str:
         return "관련 정보를 찾을 수 없습니다 (DB 로딩 실패)."
 
     all_results_with_scores = []
+    
+    print(f"    [Vector DB 검색] 키워드: '{optimized_query}'")
     for db in selected_dbs:
         if db:
-            results = db.similarity_search_with_score(query, k=top_k)
+            # 여기서 변환된 쿼리로 검색합니다!
+            results = db.similarity_search_with_score(optimized_query, k=top_k)
             all_results_with_scores.extend(results)
 
-    # (중복 제거 및 정렬 로직은 그대로 유지)
+    # (중복 제거 및 정렬 로직 - 기존과 동일)
     unique_results = {}
     for doc, score in all_results_with_scores:
         if doc.page_content not in unique_results or score < unique_results[doc.page_content][1]:
             unique_results[doc.page_content] = (doc, score)
     sorted_results = sorted(unique_results.values(), key=lambda item: item[1])
 
-    # (Context 생성 로직은 그대로 유지)
+    # (Context 생성 - 기존과 동일)
     context = ""
     for doc, score in sorted_results[:top_k]:
-        context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n"
+        # 너무 관련 없는 것(점수 1.6 이상)은 필터링 (선택 사항)
+        if score < 1.6: 
+            context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n"
 
     if not context:
-        return "검색된 참고 자료가 없습니다."
+        return f"'{query}'(변환: {optimized_query})에 대한 관련 정보를 찾지 못했습니다."
     else:
         return context
-
 
 @tool
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
@@ -426,8 +459,11 @@ def search_professors_by_keyword(keyword: str) -> str:
         # 정규식으로 '전공(major)' 또는 '연구실(lab)'에 키워드가 포함된 교수 검색
         query = {
             "$or": [
-                {"major": {"$regex": keyword, "$options": "i"}},
-                {"lab": {"$regex": keyword, "$options": "i"}}
+                {"name": {"$regex": keyword, "$options": "i"}},     # 이름으로 찾기 (필수!)
+                {"major": {"$regex": keyword, "$options": "i"}},    # 전공으로 찾기
+                {"lab": {"$regex": keyword, "$options": "i"}},      # 연구실로 찾기
+                {"position": {"$regex": keyword, "$options": "i"}}, # 직위로 찾기
+                {"email": {"$regex": keyword, "$options": "i"}}     # 이메일로 찾기
             ]
         }
         
@@ -437,12 +473,13 @@ def search_professors_by_keyword(keyword: str) -> str:
             return f"'{keyword}' 분야와 관련된 교수님 정보를 찾지 못했습니다."
             
         # 결과 포맷팅
-        context = f"[검색된 '{keyword}' 관련 교수님 목록]\n"
         for member in results:
-            context += f"- 이름: {member.get('name', 'N/A')} 교수\n"
-            context += f"  - 연구실: {member.get('lab', 'N/A')}\n"
-            context += f"  - 전공분야: {member.get('major', 'N/A')}\n"
-            context += f"  - 이메일: {member.get('email', 'N/A')}\n"
+            context += f"- 이름: {member.get('name', '정보없음')}\n"
+            context += f"  - 직위: {member.get('position', '정보없음')}\n"
+            context += f"  - 연구실: {member.get('lab', '정보없음')}\n"
+            context += f"  - 전공분야: {member.get('major', '정보없음')}\n"
+            context += f"  - 이메일: {member.get('email', '정보없음')}\n"
+            context += f"  - 전화번호: {member.get('phone', '정보없음')}\n"
             context += "---\n"
             
         return context
