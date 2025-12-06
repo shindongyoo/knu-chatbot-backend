@@ -471,6 +471,8 @@ def search_professors_by_keyword(keyword: str) -> str:
         
         if not results:
             return f"'{keyword}' 분야와 관련된 교수님 정보를 찾지 못했습니다."
+        
+        context = f"[검색된 '{keyword}' 관련 교수님 목록 (총 {len(results)}명)]\n"
             
         # 결과 포맷팅
         for member in results:
