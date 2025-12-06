@@ -21,6 +21,13 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
+from langchain_community.tools import DuckDuckGoSearchRun
+
+web_search_tool = DuckDuckGoSearchRun(
+    name="Web_Search",
+    description="졸업요건이나 교과과정 등 '학교 내부 정보'가 아닌, '맛집', '날씨', '최신 뉴스' 등 일반적인 인터넷 정보가 필요할 때 사용합니다."
+)
+
 load_dotenv()
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from app.database import chatbot_db, r
@@ -40,7 +47,8 @@ tools = [
     get_graduation_info, 
     search_curriculum_subjects, 
     search_professors_by_keyword, 
-    get_employment_stats
+    get_employment_stats,
+    web_search_tool
 ]
 
 # FastAPI 앱 설정
