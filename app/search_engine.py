@@ -199,30 +199,44 @@ def search_similar_documents(query: str, top_k: int = 3) -> str:
     all_results_with_scores = []
     
     print(f"    [Vector DB 검색] 키워드: '{optimized_query}'")
+    CANDIDATE_K = 10 
+    
     for db in selected_dbs:
         if db:
-            # 여기서 변환된 쿼리로 검색합니다!
-            results = db.similarity_search_with_score(optimized_query, k=top_k)
+            results = db.similarity_search_with_score(optimized_query, k=CANDIDATE_K)
             all_results_with_scores.extend(results)
-
+    
     # (중복 제거 및 정렬 로직 - 기존과 동일)
     unique_results = {}
     for doc, score in all_results_with_scores:
         if doc.page_content not in unique_results or score < unique_results[doc.page_content][1]:
             unique_results[doc.page_content] = (doc, score)
-    sorted_results = sorted(unique_results.values(), key=lambda item: item[1])
+            
+    similarity_sorted = sorted(unique_results.values(), key=lambda item: item[1])
 
     # (Context 생성 - 기존과 동일)
-    context = ""
-    for doc, score in sorted_results[:top_k]:
-        # 너무 관련 없는 것(점수 1.6 이상)은 필터링 (선택 사항)
-        if score < 1.6: 
-            context += f"- 내용 (점수: {score:.4f}): {doc.page_content}\n---\n"
+    relevant_docs = []
+    for doc, score in similarity_sorted:
+        if score <= 1.5: # 1.5보다 크면 관련 없는 문서로 간주
+            relevant_docs.append(doc)
+    
+    if not relevant_docs:
+        return f"'{query}'에 대한 관련 정보를 찾지 못했습니다."
+    
+    def get_date_key(document):
+        return document.metadata.get('date', '0000-00-00') # 날짜 없으면 제일 과거로 취급
 
-    if not context:
-        return f"'{query}'(변환: {optimized_query})에 대한 관련 정보를 찾지 못했습니다."
-    else:
-        return context
+    date_sorted_docs = sorted(relevant_docs, key=get_date_key, reverse=True)
+    
+    context = ""
+    print(f"    [결과 정렬] 관련 문서 {len(date_sorted_docs)}개를 최신순으로 정렬했습니다.")
+    
+    for doc in date_sorted_docs[:top_k]:
+        date = doc.metadata.get('date', '날짜없음')
+        # AI가 날짜를 인지하도록 Context에 날짜 강조
+        context += f"- 내용 (작성일: {date}): {doc.page_content}\n---\n"
+
+    return context
 
 @tool
 def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
