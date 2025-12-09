@@ -16,15 +16,14 @@ from openai import OpenAI
 load_dotenv()
 
 embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-small",  # <-- "ada-002"에서 변경!
+    model="text-embedding-3-small",  
     openai_api_key=os.getenv("OPENAI_API_KEY")
 )
 
-# app/search_engine.py 의 load_vector_db_manually 함수를 이걸로 교체
 
 def load_vector_db_manually(folder_path, index_name):
     faiss_path = os.path.join(folder_path, f"{index_name}.faiss")
-    pkl_path = os.path.join(folder_path, f"{index_name}.pkl") # 이제 이게 '좋은 주소록'
+    pkl_path = os.path.join(folder_path, f"{index_name}.pkl") 
     if not os.path.exists(faiss_path) or not os.path.exists(pkl_path):
         raise FileNotFoundError(f"'{folder_path}'에서 DB 파일을 찾을 수 없습니다: {index_name}")
     
@@ -37,7 +36,6 @@ def load_vector_db_manually(folder_path, index_name):
     docstore_dict = {}
     index_to_docstore_id = {}
 
-    # ▼▼▼ [핵심 수정: Document 생성 방식 변경] ▼▼▼
     for i, doc_dict in enumerate(docs_data):
         # DB 생성 시 사용된 'full_text'와 유사하게 page_content를 재구성
         # (DB 생성 코드의 metadata 포맷을 참고하여 필드 추가/수정 필요)
@@ -63,7 +61,7 @@ def load_vector_db_manually(folder_path, index_name):
         doc_id = str(i)
         docstore_dict[doc_id] = doc_obj
         index_to_docstore_id[i] = doc_id
-    # ▲▲▲ [수정 완료] ▲▲▲
+    
 
     docstore = InMemoryDocstore(docstore_dict)
 
@@ -247,7 +245,7 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
     
     try:
         # 1. 컬렉션 이름 확인 (가장 흔한 원인!)
-        COLLECTION_NAME = "graduation_requirements2" # <--- 님 DB 컬렉션 이름과 같은지 꼭 확인!
+        COLLECTION_NAME = "graduation_requirements2" 
         collection = chatbot_db[COLLECTION_NAME] 
         
         # 2. 학번 변환
@@ -307,7 +305,7 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
             
         # --- [3. Context 생성 (최종 상세 스키마 반영)] ---
         if result:
-            # ▼▼▼ [핵심 수정: 상세 스키마 반영] ▼▼▼
+            
             
             # 안전하게 데이터 추출 (객체가 없으면 빈 dict 반환)
             requirements = result.get('requirements', {}) 
@@ -373,7 +371,7 @@ def get_graduation_info(student_id_prefix: str, abeek_bool: bool) -> str:
             [종합 비고]
             {format_list(requirements.get('notes', []))}
             """
-            # ▲▲▲ [수정 완료] ▲▲▲
+            
             return context
         else:
             print("[5. 결과] 매칭되는 문서를 찾지 못했습니다.")
@@ -433,7 +431,7 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
         print(f"--- [디버깅] 문서 {len(target_docs)}개 내부 탐색 시작 ---")
 
         for doc in target_docs:
-            # ▼▼▼ [핵심 수정] 데이터 위치 자동 탐색 ▼▼▼
+            
             # 1순위: 최상위에 curriculum이 있는 경우
             curriculum = doc.get('curriculum', {})
             subjects = curriculum.get('subjects', [])
@@ -443,7 +441,7 @@ def search_curriculum_subjects(student_id_prefix: str = None, abeek_bool: bool =
                 requirements = doc.get('requirements', {})
                 curriculum = requirements.get('curriculum', {})
                 subjects = curriculum.get('subjects', [])
-            # ▲▲▲ [수정 완료] ▲▲▲
+            
             
             for sub in subjects:
                 # 모듈 체크

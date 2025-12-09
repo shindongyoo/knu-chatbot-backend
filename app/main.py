@@ -32,7 +32,7 @@ load_dotenv()
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 from app.database import chatbot_db, r
 
-# --- [핵심 수정: 함수들을 '도구'로 import] ---
+# 함수들을 '도구'로 import]
 from app.search_engine import (
     search_similar_documents, 
     get_graduation_info, 
@@ -41,7 +41,7 @@ from app.search_engine import (
     get_employment_stats
 )
 
-# 5개의 도구를 모두 등록합니다.
+# 5개의 도구를 모두 등록
 tools = [
     search_similar_documents, 
     get_graduation_info, 
@@ -113,7 +113,7 @@ async def upload_file(
         if not extracted_text:
             extracted_text = "(파일에서 텍스트를 추출할 수 없습니다.)"
 
-        # ★ 핵심: 추출된 텍스트를 '사용자가 보낸 메시지'처럼 저장하여 AI가 읽을 수 있게 함
+        # 추출된 텍스트를 '사용자가 보낸 메시지'처럼 저장하여 AI가 읽을 수 있게 함
         user_message_for_history = f"[사용자가 파일을 업로드함: {file.filename}]\n[파일 내용 시작]\n{extracted_text}\n[파일 내용 끝]"
         ai_ack_message = f"파일 '{file.filename}'을 확인했습니다. 내용에 대해 질문해 주세요."
         
@@ -158,11 +158,11 @@ def get_recent_history(session_id: str, n=5) -> list[dict]: # n=3 -> n=5 (조절
 def save_chat_history(user_id: str, session_id: str, question: str, answer: str):
     if not r: return
     try:
-        # 1. 세션 목록을 저장하는 키를 사용자별로 분리합니다.
+        # 1. 세션 목록을 저장하는 키를 사용자별로 분리
         #    'sessions_sorted' -> 'user:{user_id}:sessions_sorted'
         r.zadd(f"user:{user_id}:sessions_sorted", {session_id: time.time()})
 
-        # 2. 개별 대화 내용은 session_id로 이미 고유하므로 그대로 둡니다.
+        # 2. 개별 대화 내용은 session_id로 이미 고유하므로 그대로
         key = f"chat:{session_id}"
         log_entry = json.dumps({
             "question": question,
@@ -244,7 +244,7 @@ agent = create_openai_functions_agent(llm, tools, agent_prompt) # <--- llm (정�
 agent_executor = AgentExecutor(
     agent=agent,
     tools=tools, 
-    verbose=True, # AI의 '생각' 과정을 터미널에 출력 (매우 중요!)
+    verbose=True, # AI의 '생각' 과정을 터미널에 출력
     handle_parsing_errors=True # AI가 실수해도 멈추지 않게 함
 )
 
@@ -269,7 +269,7 @@ def stream_answer(req: QuestionRequest):
             
             collected_answer = ""
             for chunk in response_stream:
-                # agent.stream()은 'output' 키로 최종 답변 조각을 줍니다.
+                # agent.stream()은 'output' 키로 최종 답변 조각을 줌줌
                 if "output" in chunk:
                     delta = chunk["output"]
                     collected_answer += delta
@@ -289,7 +289,6 @@ def stream_answer(req: QuestionRequest):
             
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-# app/main.py의 @app.post("/ask") 함수 전체를 이걸로 교체하세요.
 
 @app.post("/ask")
 async def ask(req: QuestionRequest):
@@ -316,9 +315,6 @@ async def ask(req: QuestionRequest):
         traceback.print_exc()
         return JSONResponse(content={"error": f"답변 생성 중 오류: {e}"}, status_code=500)
 
-# 2025-09-21
-
-# URL 경로에 user_id를 받도록 변경: @app.get("/sessions") -> @app.get("/sessions/{user_id}")
 @app.get("/sessions/{user_id}")
 async def get_sessions(user_id: str):
     if not r: return JSONResponse(content={"error": "Redis not connected"}, status_code=500)
@@ -334,7 +330,6 @@ async def get_sessions(user_id: str):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# ▼▼▼ 이 함수 전체를 복사해서 붙여넣으세요 ▼▼▼
 @app.get("/history/{session_id}")
 async def get_chat_history(
     session_id: str,
@@ -404,8 +399,7 @@ async def get_chat_history(
             status_code=500,
             content={"error": f"An unexpected error occurred: {e}"}
         )
-        
-# main.py 파일에 추가
+
 
 @app.delete("/delete_session/{session_id}")
 async def delete_session(session_id: str, user_id: str):
@@ -435,7 +429,6 @@ async def delete_session(session_id: str, user_id: str):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# app/main.py 파일에 추가
 
 @app.get("/sessions/latest/{user_id}")
 async def get_latest_session_history(user_id: str):
@@ -446,7 +439,7 @@ async def get_latest_session_history(user_id: str):
         return JSONResponse(status_code=503, content={"error": "Redis service is unavailable"})
 
     try:
-        # 1. 해당 사용자의 가장 최근 session_id를 1개만 가져옵니다.
+        # 1. 해당 사용자의 가장 최근 session_id를 1개만 가져옴옴
         session_list_key = f"user:{user_id}:sessions_sorted"
         latest_session_ids = r.zrevrange(session_list_key, 0, 0)
         
@@ -456,7 +449,7 @@ async def get_latest_session_history(user_id: str):
 
         latest_session_id = latest_session_ids[0]
 
-        # 2. 해당 session_id의 전체 대화 기록을 가져옵니다.
+        # 2. 해당 session_id의 전체 대화 기록을 가져옴옴
         chat_key = f"chat:{latest_session_id}"
         logs_raw = r.lrange(chat_key, 0, -1)
 
@@ -467,7 +460,7 @@ async def get_latest_session_history(user_id: str):
             if question: messages.append({"role": "user", "text": question})
             if answer: messages.append({"role": "assistant", "text": answer})
 
-        # 3. 프론트엔드가 대화를 이어갈 수 있도록 session_id와 메시지 목록을 함께 반환합니다.
+        # 3. 프론트엔드가 대화를 이어갈 수 있도록 session_id와 메시지 목록을 함께 반환
         return JSONResponse(content={
             "session_id": latest_session_id,
             "messages": messages
@@ -493,7 +486,7 @@ def debug_db_files():
         for name in files:
             file_path = os.path.join(root, name)
             try:
-                # 파일 경로에서 /app/ 부분을 기준으로 상대 경로를 만듭니다.
+                # 파일 경로에서 /app/ 부분을 기준으로 상대 경로를 만듬듬
                 relative_path = os.path.relpath(file_path, start=os.path.join(os.path.dirname(__file__), '..'))
                 file_size_bytes = os.path.getsize(file_path)
                 file_info[relative_path] = f"{file_size_bytes} bytes"
