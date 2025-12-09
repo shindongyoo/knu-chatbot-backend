@@ -78,15 +78,27 @@ def load_vector_db_manually(folder_path, index_name):
 def optimize_search_query(query: str) -> str:
     """
     사용자의 애매한 질문을 공지사항/규정 DB 검색에 적합한 '핵심 키워드 문장'으로 변환합니다.
+    단, 기업명이나 교수명 같은 고유명사는 절대 변경하지 않습니다.
     예: "학교 좀 쉬고 싶어" -> "휴학 신청 절차 및 기간"
     예: "돈 주는거 뭐 있어?" -> "장학금 종류 및 신청 안내"
     """
     try:
         client = OpenAI() # 환경변수 API KEY 사용
+        
+        system_prompt = """당신은 검색어 최적화 도구입니다. 
+        사용자의 질문을 대학교 공지사항이나 규정집에서 검색하기 좋은 '공식 용어'로 변환하세요.
+
+        [절대 규칙]
+        1. **기업명(삼성, 현대, LG 등)이나 교수님 성함(한세경 등) 같은 고유명사는 절대로 변경하거나 삭제하지 마세요.** 그대로 포함시켜야 합니다.
+        2. "삼성 채용" -> "삼성 채용 공고 모집 요강" (O)
+        3. "삼성 채용" -> "대학교 취업 안내" (X - 기업명이 사라짐!)
+        4. "쉬고 싶어" -> "휴학 신청 절차" (O - 애매한 표현은 변환)
+        """
+        
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "당신은 검색어 최적화 도구입니다. 사용자의 질문을 대학교 공지사항이나 규정집에서 검색하기 가장 좋은 '공식적인 용어'와 '문장'으로 변환해서 딱 그 문장만 대답하세요."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"질문: {query}"}
             ],
             temperature=0
